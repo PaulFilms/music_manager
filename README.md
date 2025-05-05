@@ -7,5 +7,5 @@ Incluyendo plataformas como Apple Music, Spotify, Tidal, y archivos locales
 Librerias y herramientas usadas:
 
 - [TINYTAG](https://github.com/tinytag/tinytag.git)
-- [GAMDL]()
+- [GAMDL](https://github.com/glomatico/gamdl.git)
 - [FFMPEG](https://ffmpeg.org/)
