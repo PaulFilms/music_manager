@@ -10,13 +10,16 @@ from io import StringIO
 if not 'cookie' in st.session_state:
     st.session_state.cookie = None
 
+if "proc" not in st.session_state:
+    st.session_state.proc = None
+
 logo = r'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fwww.pngarts.com%2Ffiles%2F8%2FApple-Music-Logo-PNG-Photo.png&f=1&nofb=1&ipt=e1b53e796e2f7e19a300a29fe5d05a076a8641f06b7a52514f1cc8da7962234b',
 
 
 with st.sidebar:
     st.image(
         logo,
-        width=200
+        width=100
     )
     st.text('⚙️ SETTINGS')
     st.button('GET COOKIE 🍪', use_container_width=True)

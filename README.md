@@ -19,3 +19,6 @@ brew install ffmpeg
 Formato avanzado de tablas para Streamlit:
 
 [streamlit-aggrid (Git)](https://github.com/PablocFonseca/streamlit-aggrid?tab=readme-ov-file)
+
+## TAREAS
+ - Añadir con appl el control de duplicados (el codigo esta en el jupyter)
