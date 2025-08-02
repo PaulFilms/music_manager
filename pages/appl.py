@@ -10,14 +10,25 @@ from io import StringIO
 if not 'cookie' in st.session_state:
     st.session_state.cookie = None
 
-st.image(
-    r'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fwww.pngarts.com%2Ffiles%2F8%2FApple-Music-Logo-PNG-Photo.png&f=1&nofb=1&ipt=e1b53e796e2f7e19a300a29fe5d05a076a8641f06b7a52514f1cc8da7962234b',
-    width=100
-)
+logo = r'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fwww.pngarts.com%2Ffiles%2F8%2FApple-Music-Logo-PNG-Photo.png&f=1&nofb=1&ipt=e1b53e796e2f7e19a300a29fe5d05a076a8641f06b7a52514f1cc8da7962234b',
 
-st.logo(
-    r'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fwww.pngarts.com%2Ffiles%2F8%2FApple-Music-Logo-PNG-Photo.png&f=1&nofb=1&ipt=e1b53e796e2f7e19a300a29fe5d05a076a8641f06b7a52514f1cc8da7962234b',
-)
+
+with st.sidebar:
+    st.image(
+        logo,
+        width=200
+    )
+    st.text('⚙️ SETTINGS')
+    st.button('GET COOKIE 🍪', use_container_width=True)
+
+# st.image(
+#     r'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fwww.pngarts.com%2Ffiles%2F8%2FApple-Music-Logo-PNG-Photo.png&f=1&nofb=1&ipt=e1b53e796e2f7e19a300a29fe5d05a076a8641f06b7a52514f1cc8da7962234b',
+#     width=100
+# )
+
+# st.logo(
+#     r'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fwww.pngarts.com%2Ffiles%2F8%2FApple-Music-Logo-PNG-Photo.png&f=1&nofb=1&ipt=e1b53e796e2f7e19a300a29fe5d05a076a8641f06b7a52514f1cc8da7962234b',
+# )
 
 # st.title('APPL')
 
@@ -56,7 +67,13 @@ with st.expander('DOWNLOAD FROM URL', expanded=False):
         ])
 
         with tab1:
-            st.file_uploader("Choose a TXT file", accept_multiple_files=False)
+            cookie_str1 = st.file_uploader("Choose a TXT file", accept_multiple_files=False)
+            if cookie_str1:
+                # stringio = StringIO(cookie_str1.getvalue().decode("utf-8"))
+                # st.write(stringio)
+                cookie_str = cookie_str1.getvalue().decode("utf-8")
+                st.session_state.cookie = cookie_str
+                st.rerun()
         
         with tab2:
             if st.button('MAGIX'):
@@ -70,9 +87,9 @@ with st.expander('DOWNLOAD FROM URL', expanded=False):
                 # placeholder=st.session_state.placeholder,
                 # key = 'path_source'
             )
-            if cookie_str: 
-                st.session_state.cookie = cookie_str
-                st.rerun()
+        if cookie_str: 
+            st.session_state.cookie = cookie_str
+            st.rerun()
     else:
         url_appl = st.text_input(
             "WRITE THE SOURCE URL 🔗",
@@ -101,13 +118,25 @@ with st.expander('DOWNLOAD FROM URL', expanded=False):
                     bufsize=1,
                     text=True,
                 ) as proc:
-                    output = ""
+                    # output = ""
+                    # for line in proc.stdout:
+                    #     output += line
+                    #     # output_area.text(output)  # Actualiza la salida progresivamente
+                    #     output_area.text_area("Salida:", output, height=300)
+
+                    # proc.wait()
+
+                    lines = []
                     for line in proc.stdout:
-                        output += line
-                        # output_area.text(output)  # Actualiza la salida progresivamente
-                        output_area.text_area("Salida:", output, height=300)
+                        lines.append(line.rstrip())
+                        # Mantener solo las últimas 5 líneas
+                        if len(lines) > 5:
+                            lines = lines[-5:]
+                        output_area.text_area("Salida:", "\n".join(lines), height=300)
 
                     proc.wait()
+
+                
 
 with st.expander('MOVE FILES', expanded=False):
     # st.header('MOVE FILES', divider=True)
@@ -143,7 +172,7 @@ with st.expander('MOVE FILES', expanded=False):
 
 # st.header('READ FILES', divider=True)
 
-with st.expander('READ PLAYLIST 📋'):
+with st.expander('READ APPL PLAYLIST 📋'):
     tab1, tab2 = st.tabs([
         'By File',
         'By Text'

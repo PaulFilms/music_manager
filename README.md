@@ -9,3 +9,13 @@ Librerias y herramientas usadas:
 - [TINYTAG](https://github.com/tinytag/tinytag.git)
 - [GAMDL](https://github.com/glomatico/gamdl.git)
 - [FFMPEG](https://ffmpeg.org/)
+
+Para instalar FFmpeg lo mas recomendable hasta el momento es:
+
+```bash
+brew install ffmpeg
+```
+
+Formato avanzado de tablas para Streamlit:
+
+[streamlit-aggrid (Git)](https://github.com/PablocFonseca/streamlit-aggrid?tab=readme-ov-file)

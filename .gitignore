@@ -177,4 +177,6 @@ cython_debug/
 # APP
 cookies.txt
 Apple Music/
+yutuf/
 .secrets/
+.path

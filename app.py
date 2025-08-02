@@ -1,9 +1,8 @@
 import streamlit as st
-import pandas as pd
-from pathlib import Path
-from tinytag import TinyTag
-
-
+# import os
+# import pandas as pd
+# from pathlib import Path
+# from tinytag import TinyTag
 
 st.set_page_config(
     page_title="MUSIC MAKER",
@@ -17,17 +16,27 @@ st.set_page_config(
     # }
 )
 
-st.title('MUSIC MANAGER')
+# path_file = '.path'
+# if not os.path.exists(path_file):
+#     with open(path_file, 'w') as f:
+#         f.write('')
 
-st.text('')
+
+
+# st.title('MUSIC MANAGER')
+
+# st.sidebar.title('MUSIC MANAGER')
+# st.sidebar.header('📐')
+
+# st.text('')
 
 # col1, col2 = st.columns([1,9])
 
 # with col1:
-st.image(
-    r'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fstatic.vecteezy.com%2Fsystem%2Fresources%2Fpreviews%2F009%2F346%2F267%2Foriginal%2F3d-render-icon-yellow-folder-illustration-free-png.png&f=1&nofb=1&ipt=6673e80b08edcd684d1f4a84e4ca57e2fc646404d5017bd0a1e2453f04f72b71',
-    width=50
-)
+# st.image(
+#     r'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fstatic.vecteezy.com%2Fsystem%2Fresources%2Fpreviews%2F009%2F346%2F267%2Foriginal%2F3d-render-icon-yellow-folder-illustration-free-png.png&f=1&nofb=1&ipt=6673e80b08edcd684d1f4a84e4ca57e2fc646404d5017bd0a1e2453f04f72b71',
+#     width=50
+# )
 # with col2:
 #     st.write('LOCAL FILES')
 
@@ -47,49 +56,49 @@ st.image(
 #     width=100
 # )
 
-path_souce = st.text_input(
-    'SOURCE PATH 🔗',
-    value=r'/Users/mbair/Desktop/[MUSIC CONSOLIDED]'
-    )
+# path_souce = st.text_input(
+#     'SOURCE PATH 🔗',
+#     value=r'/Users/mbair/Desktop/[MUSIC CONSOLIDED]'
+#     )
 
-if path_souce:
-    path = Path(path_souce)
-    playlist = [folder for folder in path.rglob('*') if folder.is_dir()]
-    playlist.insert(0, 'All ...')
-    obj = st.dataframe(
-        playlist,
-        hide_index=True,
-        selection_mode='single-row',
-        on_select='rerun'
-    )
+# if path_souce:
+#     path = Path(path_souce)
+#     playlist = [folder for folder in path.rglob('*') if folder.is_dir()]
+#     playlist.insert(0, 'All ...')
+#     obj = st.dataframe(
+#         playlist,
+#         hide_index=True,
+#         selection_mode='single-row',
+#         on_select='rerun'
+#     )
 
-    folder = path_souce
+#     folder = path_souce
 
-    if obj.selection['rows'] and obj.selection['rows'][0] > 0:
-        # st.write(obj.selection)
-        row = obj.selection['rows'][0]
-        folder = playlist[row]
-        st.write(folder)
+#     if obj.selection['rows'] and obj.selection['rows'][0] > 0:
+#         # st.write(obj.selection)
+#         row = obj.selection['rows'][0]
+#         folder = playlist[row]
+#         st.write(folder)
     
-    if st.button('READ PATH'):
-        # row = 0
-        # df = pd.DataFrame(None)
-        lista = []
-        for file in Path(folder).rglob('*'):
-            if file.is_file() and file.suffix in TinyTag.SUPPORTED_FILE_EXTENSIONS:
-                tag = TinyTag.get(file)
-                # st.write(tag)
-                # df.iloc[row] = tag.as_dict()
-                # row += 1
-                # tag_fields = tag.as_dict()
-                # tag_fields['bpm'] = tag.other.bpm
-                # other_fields = tag.other
-                # catalog_numbers: list[str] | None = other_fields.get('catalog_number')
-                # st.write(other_fields)
-                st.write(tag.other.get('BPM'))
-                lista.append(tag.as_dict())
-        # df = pd.DataFrame(lista)
-        st.dataframe(
-            lista
-        )
-        st.text(f'Tracks: {len(lista)}')
+#     if st.button('READ PATH'):
+#         # row = 0
+#         # df = pd.DataFrame(None)
+#         lista = []
+#         for file in Path(folder).rglob('*'):
+#             if file.is_file() and file.suffix in TinyTag.SUPPORTED_FILE_EXTENSIONS:
+#                 tag = TinyTag.get(file)
+#                 # st.write(tag)
+#                 # df.iloc[row] = tag.as_dict()
+#                 # row += 1
+#                 # tag_fields = tag.as_dict()
+#                 # tag_fields['bpm'] = tag.other.bpm
+#                 # other_fields = tag.other
+#                 # catalog_numbers: list[str] | None = other_fields.get('catalog_number')
+#                 # st.write(other_fields)
+#                 st.write(tag.other.get('BPM'))
+#                 lista.append(tag.as_dict())
+#         # df = pd.DataFrame(lista)
+#         st.dataframe(
+#             lista
+#         )
+#         st.text(f'Tracks: {len(lista)}')
