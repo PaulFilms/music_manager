@@ -1,11 +1,21 @@
-import streamlit as st
+
 import os
 import subprocess
 import shutil
 from pathlib import Path
-from tinytag import TinyTag
+# from tinytag import TinyTag
 import pandas as pd
-from io import StringIO
+# from io import StringIO
+
+from functions import APPL
+
+path_appl = r'/Users/mbair/Desktop/[MUSIC CONSOLIDED]'
+
+## PAGE
+import streamlit as st
+
+if not 'running' in st.session_state:
+    st.session_state.running = False
 
 if not 'cookie' in st.session_state:
     st.session_state.cookie = None
@@ -13,26 +23,18 @@ if not 'cookie' in st.session_state:
 if "proc" not in st.session_state:
     st.session_state.proc = None
 
-logo = r'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fwww.pngarts.com%2Ffiles%2F8%2FApple-Music-Logo-PNG-Photo.png&f=1&nofb=1&ipt=e1b53e796e2f7e19a300a29fe5d05a076a8641f06b7a52514f1cc8da7962234b',
-
+path_logo = r'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fwww.pngarts.com%2Ffiles%2F8%2FApple-Music-Logo-PNG-Photo.png&f=1&nofb=1&ipt=e1b53e796e2f7e19a300a29fe5d05a076a8641f06b7a52514f1cc8da7962234b',
 
 with st.sidebar:
     st.image(
-        logo,
+        path_logo,
         width=100
     )
     st.text('⚙️ SETTINGS')
     st.button('GET COOKIE 🍪', use_container_width=True)
 
-# st.image(
-#     r'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fwww.pngarts.com%2Ffiles%2F8%2FApple-Music-Logo-PNG-Photo.png&f=1&nofb=1&ipt=e1b53e796e2f7e19a300a29fe5d05a076a8641f06b7a52514f1cc8da7962234b',
-#     width=100
-# )
-
-# st.logo(
-#     r'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fwww.pngarts.com%2Ffiles%2F8%2FApple-Music-Logo-PNG-Photo.png&f=1&nofb=1&ipt=e1b53e796e2f7e19a300a29fe5d05a076a8641f06b7a52514f1cc8da7962234b',
-# )
-
+# st.image(path_logo, width=100)
+# st.logo(path_logo)
 # st.title('APPL')
 
 # st.header(
@@ -40,27 +42,31 @@ with st.sidebar:
 #     divider=True
 # )
 
-# col1, col2 = st.columns(2)
 
-# with col1:
-#     st.image(
-#         r'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fwww.pngarts.com%2Ffiles%2F8%2FApple-Music-Logo-PNG-Photo.png&f=1&nofb=1&ipt=e1b53e796e2f7e19a300a29fe5d05a076a8641f06b7a52514f1cc8da7962234b',
-#         width=100
-#     )
+## FUNCTIONS
 
-# with col2:
-    
+def download_url(url: str, console_placeholder=None):
+    comando = ["gamdl", url]
+    with subprocess.Popen(comando,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+            text=True,
+        ) as proc:
+        lines = []
+        for line in proc.stdout:
+            lines.append(line.rstrip())
+            if len(lines) > 5: # Mantener solo las últimas 5 líneas
+                lines = lines[-5:]
+            if console_placeholder: 
+                console_placeholder.text_area("Salida:", "\n".join(lines), height=300)
+        proc.wait()
 
+## DOWNLOAD FROM URL
 with st.expander('DOWNLOAD FROM URL', expanded=False):
     st.text('')
 
     if not st.session_state.cookie:
-
-        # st.header(
-        #     'GET COOKIE 🍪', 
-        #     # divider=True
-        # )
-
         st.text('GET COOKIE 🍪')
 
         tab1, tab2, tab3 = st.tabs([
@@ -90,6 +96,7 @@ with st.expander('DOWNLOAD FROM URL', expanded=False):
                 # placeholder=st.session_state.placeholder,
                 # key = 'path_source'
             )
+        
         if cookie_str: 
             st.session_state.cookie = cookie_str
             st.rerun()
@@ -97,50 +104,37 @@ with st.expander('DOWNLOAD FROM URL', expanded=False):
         url_appl = st.text_input(
             "WRITE THE SOURCE URL 🔗",
             label_visibility='visible',
-            # disabled=st.session_state.disabled,
-            # placeholder=st.session_state.placeholder,
+            disabled=st.session_state.running,
             key = 'url_appl'
         )
 
         if url_appl:
-            if st.button('APPL RUN', use_container_width=True):
+            if st.button('APPL RUN', use_container_width=True, disabled=st.session_state.running):
+                st.session_state.running = True
 
-                st.write("Ejecutando comando...")
+                url_type = APPL.Type.get_type(url_appl)
+                if url_type == APPL.Type.PLAYLIST or url_type == APPL.Type.ALBUM or url_type == APPL.Type.ARTIST:
+                    tracks = APPL.get_tracks(url_appl)
+                    tracks = APPL.get_not_duplicates(url_appl, path=path_appl)
+                    
+                    item_placeholder = st.empty()
+                    console_placeholder = st.empty()
+                    
+                    i = 1
+                    for track in tracks:
+                        item_placeholder.write(f'NEW ({i}/{len(tracks)}): {track["artistName"]} | {track["name"]}')
+                        track_url = track['url']
+                        download_url(track['url'], console_placeholder)
+                        i += 1
+                    console_placeholder = st.empty()
+                    item_placeholder.write('FINISHED!')
+                else:
+                    download_url(url_appl)
 
-                # Construir el comando
-                comando = ["gamdl", url_appl]
+                st.session_state.running = False
 
-                # Crear un placeholder en Streamlit para ir actualizando la salida
-                output_area = st.empty()
 
-                # Ejecutar el proceso en tiempo real
-                with subprocess.Popen(
-                    comando,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    bufsize=1,
-                    text=True,
-                ) as proc:
-                    # output = ""
-                    # for line in proc.stdout:
-                    #     output += line
-                    #     # output_area.text(output)  # Actualiza la salida progresivamente
-                    #     output_area.text_area("Salida:", output, height=300)
-
-                    # proc.wait()
-
-                    lines = []
-                    for line in proc.stdout:
-                        lines.append(line.rstrip())
-                        # Mantener solo las últimas 5 líneas
-                        if len(lines) > 5:
-                            lines = lines[-5:]
-                        output_area.text_area("Salida:", "\n".join(lines), height=300)
-
-                    proc.wait()
-
-                
-
+## MANAGE FILES
 with st.expander('MOVE FILES', expanded=False):
     # st.header('MOVE FILES', divider=True)
 
@@ -175,6 +169,7 @@ with st.expander('MOVE FILES', expanded=False):
 
 # st.header('READ FILES', divider=True)
 
+## READ APPL PLAYLIST
 with st.expander('READ APPL PLAYLIST 📋'):
     tab1, tab2 = st.tabs([
         'By File',

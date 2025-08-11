@@ -1,7 +1,7 @@
 ## PYTHON
 import os, subprocess
 from pathlib import Path
-# import pandas as pd
+import pandas as pd
 # import yt_dlp
 from functions import YUTUF, clean_filename
 from typing import TYPE_CHECKING
@@ -22,6 +22,10 @@ if TYPE_CHECKING:
 
 ## PAGE
 import streamlit as st
+
+@st.cache_data
+def get_files(path: str, count: int) -> pd.DataFrame:
+    return YUTUF.get_files(path, count)
 
 if not 'yutuf_count' in st.session_state:
     st.session_state.yutuf_count = 0
@@ -96,7 +100,8 @@ def download(url: str, audio: bool = False):
         if f.lower().endswith(extension)
     ]
     if yutuf_name_clean not in media_files:
-        YUTUF.download(yutuf_path, url, audio=audio)
+        if YUTUF.download(yutuf_path, url, audio=audio):
+            st.rerun()
     else:
         st.write('✅ File already exists.')
     # if YUTUF.get_file_name(url) + extension in os.listdir(yutuf_path):
@@ -116,7 +121,7 @@ if url and col2.button('DOWNLOAD AUDIO', use_container_width=True):
 st.subheader('📀 FILES', divider='orange')
 
 if os.path.exists(yutuf_path):
-    files_df = YUTUF.get_files(yutuf_path, st.session_state.yutuf_count)
+    files_df = get_files(yutuf_path, st.session_state.yutuf_count)
 
     files_stdf = st.dataframe(
         files_df,
