@@ -102,3 +102,25 @@ st.set_page_config(
 #             lista
 #         )
 #         st.text(f'Tracks: {len(lista)}')
+
+page_browser = st.Page(r'pages/browser.py', title='BROWSER', icon='🗄️')
+page_local = st.Page(r'pages/local.py', title='LOCAL', icon='💾')
+page_appl = st.Page(r'pages/appl.py', title='APPL', icon='💽')
+page_yutuf = st.Page(r'pages/yutuf.py', title='YUTUF', icon='📼')
+page_converter = st.Page(r'pages/converter.py', title='CONVERTER', icon='🔄')
+
+pg = st.navigation(
+    {
+        '⚙️': [
+            page_browser,
+            page_converter
+        ],
+        '🎹': [
+            page_local,
+            page_appl,
+            page_yutuf
+        ]
+    }
+)
+
+pg.run()

@@ -22,6 +22,7 @@ Formato avanzado de tablas para Streamlit:
 
 ## TAREAS
  - Añadir con appl el control de duplicados (el codigo esta en el jupyter)
+ - No descarga appl videos
  - ChatGPT:
 
 para poder mostrar el proceso lo tengo con with:

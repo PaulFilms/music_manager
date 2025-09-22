@@ -1,4 +1,3 @@
-
 import os
 import subprocess
 import shutil
@@ -6,12 +5,34 @@ from pathlib import Path
 # from tinytag import TinyTag
 import pandas as pd
 # from io import StringIO
-
 from functions import APPL
+
+
+
+## FUNCTIONS
 
 path_appl = r'/Users/mbair/Desktop/[MUSIC CONSOLIDED]'
 
+def download_url(url: str, console_placeholder=None):
+    comando = ["gamdl", url]
+    with subprocess.Popen(comando,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+            text=True,
+        ) as proc:
+        lines = []
+        for line in proc.stdout:
+            lines.append(line.rstrip())
+            if len(lines) > 5: # Mantener solo las últimas 5 líneas
+                lines = lines[-5:]
+            if console_placeholder: 
+                console_placeholder.text_area("Salida:", "\n".join(lines), height=300)
+        proc.wait()
+
+
 ## PAGE
+
 import streamlit as st
 
 if not 'running' in st.session_state:
@@ -43,26 +64,8 @@ with st.sidebar:
 # )
 
 
-## FUNCTIONS
-
-def download_url(url: str, console_placeholder=None):
-    comando = ["gamdl", url]
-    with subprocess.Popen(comando,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            bufsize=1,
-            text=True,
-        ) as proc:
-        lines = []
-        for line in proc.stdout:
-            lines.append(line.rstrip())
-            if len(lines) > 5: # Mantener solo las últimas 5 líneas
-                lines = lines[-5:]
-            if console_placeholder: 
-                console_placeholder.text_area("Salida:", "\n".join(lines), height=300)
-        proc.wait()
-
 ## DOWNLOAD FROM URL
+
 with st.expander('DOWNLOAD FROM URL', expanded=False):
     st.text('')
 
@@ -122,7 +125,7 @@ with st.expander('DOWNLOAD FROM URL', expanded=False):
                     
                     i = 1
                     for track in tracks:
-                        item_placeholder.write(f'NEW ({i}/{len(tracks)}): {track["artistName"]} | {track["name"]}')
+                        item_placeholder.write(f'NEW ({i}/{len(tracks)}): {track["artistName"]} - {track["name"]}')
                         track_url = track['url']
                         download_url(track['url'], console_placeholder)
                         i += 1
@@ -134,7 +137,9 @@ with st.expander('DOWNLOAD FROM URL', expanded=False):
                 st.session_state.running = False
 
 
+
 ## MANAGE FILES
+
 with st.expander('MOVE FILES', expanded=False):
     # st.header('MOVE FILES', divider=True)
 
@@ -167,9 +172,12 @@ with st.expander('MOVE FILES', expanded=False):
                 )
         ## BUG: Eliminar carpeta source
 
-# st.header('READ FILES', divider=True)
+
 
 ## READ APPL PLAYLIST
+
+# st.header('READ FILES', divider=True)
+
 with st.expander('READ APPL PLAYLIST 📋'):
     tab1, tab2 = st.tabs([
         'By File',
@@ -220,6 +228,13 @@ with st.expander('READ APPL PLAYLIST 📋'):
                     hide_index=True
                 )
                 # st.write(fields_visible[])
+            
+            if st.button('SHOW RECORDS'):
+                playlist = [{"artistName": track['Artista'], "name": track['Nombre']} for track in dataframe[fields_visible_list].to_dict(orient='records')]
+                not_duplicates = APPL.get_not_duplicates_pl(playlist, path=path_appl)
+                st.write(f'NEW TRACKS: {len(not_duplicates)}')
+                for track in not_duplicates:
+                    st.text(f'{track["artistName"]} - {track["name"]}')
 
     with tab2:
         playlist = st.text_input(
@@ -232,6 +247,7 @@ with st.expander('READ APPL PLAYLIST 📋'):
         if playlist:
             if st.button('GET PLAYLIST DATA'):
                 st.balloons()
+    
 
 # fields = [
 #     'filename',

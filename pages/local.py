@@ -6,6 +6,7 @@ from enum import Enum
 from dataclasses import dataclass, fields
 # import music_tag
 from tinytag import TinyTag
+from functions import get_waveform, show_cover, get_audio_properties
 
 st.image(
     r'assets/download_folder_file_icon_219533.ico',
@@ -194,7 +195,8 @@ if st.session_state.source_path:
 
         # st.write(f"Showing {len(df_songs)} songs, {dividers:.0f} dividers per page, count: {st.session_state.counter}, n_rows: {n_rows}")
 
-        filtered_df = df_songs[tbl_fields].iloc[n_rows*st.session_state.counter:n_rows*(st.session_state.counter+1)]
+        # filtered_df = df_songs[tbl_fields].iloc[n_rows*st.session_state.counter:n_rows*(st.session_state.counter+1)]
+        filtered_df = df_songs[tbl_fields]
 
         st_song = st.dataframe(
             filtered_df,
@@ -202,24 +204,33 @@ if st.session_state.source_path:
             selection_mode='single-row',
             on_select='rerun'
         )
-        col1, col2, col3 = st.columns([4,1,1])
-        from_ = st.session_state.counter * n_rows
-        to_ = from_ + n_rows
-        if to_ > len(df_songs):
-            to_ = len(df_songs)
-        with col1: st.write(f'From {from_} to {to_} of {len(df_songs)} songs')
-        if st.session_state.counter > 0 and col2.button('', use_container_width=True, icon='⬅️'):
-            if st.session_state.counter > 0:
-                st.session_state.counter -= 1
-        if st.session_state.counter < int(f'{dividers:.0f}') and col3.button('', use_container_width=True, icon='➡️'):
-            if st.session_state.counter < int(f'{dividers:.0f}'):
-                st.session_state.counter += 1
+        # col1, col2, col3 = st.columns([4,1,1])
+        # from_ = st.session_state.counter * n_rows
+        # to_ = from_ + n_rows
+        # if to_ > len(df_songs):
+        #     to_ = len(df_songs)
+        # with col1: st.write(f'From {from_} to {to_} of {len(df_songs)} songs')
+        # if st.session_state.counter > 0 and col2.button('', use_container_width=True, icon='⬅️'):
+        #     if st.session_state.counter > 0:
+        #         st.session_state.counter -= 1
+        # if st.session_state.counter < int(f'{dividers:.0f}') and col3.button('', use_container_width=True, icon='➡️'):
+        #     if st.session_state.counter < int(f'{dividers:.0f}'):
+        #         st.session_state.counter += 1
 
         if len(st_song.selection['rows']) > 0:
-            st.write(st_song.selection['rows'])
-        #     st_song_row = st_song.selection['rows'][0]
-        #     path_song = filtered_df.iloc[st_song_row]['filename']
-        #     st.write(f"**Selected Song:** {path_song}")
+            indx = st_song.selection['rows'][0]
+            path_song = df_songs.iloc[indx]['filename']
+
+            with st.container(border=True):
+                col_cover, col_waveform = st.columns([1,5])
+                with col_cover:
+                    show_cover(path_song, size=100)
+                with col_waveform:
+                    get_waveform(path_song)
+                st.audio(path_song)
+                props = get_audio_properties(path_song)
+                props_str = " | ".join([f"{k.upper()}: {v}" for k, v in props.items()])
+                st.text(props_str)
 
         #     # st.header('🎹 SONG', divider=True)
 
@@ -230,4 +241,11 @@ if st.session_state.source_path:
 
 
 st.empty()
-st.info(f"LOCAL FILES PATH: {st.session_state.source_path}", icon="📂")
+# st.info(f"LOCAL FILES PATH: {st.session_state.source_path}", icon="📂")
+
+import streamlit as st
+import streamlit.components.v1 as components
+
+# Lectura del archivo HTML local
+# html_code = open("check-file-manager.html", "r", encoding="utf-8").read()
+# components.html(html_code, height=600)

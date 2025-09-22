@@ -24,6 +24,7 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.DS_Store
 MANIFEST
 
 # PyInstaller
@@ -178,5 +179,6 @@ cython_debug/
 cookies.txt
 Apple Music/
 yutuf/
+temp/
 .secrets/
 .path

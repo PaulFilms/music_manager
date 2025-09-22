@@ -1,19 +1,23 @@
-import os, re, unicodedata
+import os, re, unicodedata, subprocess, io
 from pathlib import Path
 from time import sleep
 from enum import Enum
 from urllib.parse import urlparse, parse_qs, urlunparse, unquote
 from typing import List, Dict, Any
 
-# import streamlit as st
+import streamlit as st
 import pandas as pd
+import numpy as np
 from tinytag import TinyTag
 import yt_dlp
 from gamdl.apple_music_api import AppleMusicApi
 from rapidfuzz import fuzz
 from PIL import Image
+import librosa
+import plotly.graph_objects as go
 
 __version__ = '2025.08.09'
+
 
 ## FUNCTIONS
 
@@ -28,7 +32,114 @@ def clean_filename(name: str) -> str:
     name = name.replace('？', '?')               # normaliza símbolos específicos
     return name.strip().lower()
 
+common_formats = ['.aac', '.flac', '.m4a', '.mp3', '.ogg', '.opus', '.wav']
 
+def get_audio_properties(file_path):
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-show_entries", "format=duration:stream=sample_rate,channels,bit_rate",
+        "-of", "default=noprint_wrappers=1",
+        file_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    props = {}
+    for line in result.stdout.splitlines():
+        if '=' in line:
+            k, v = line.strip().split('=', 1)
+            props[k] = v
+    # Convertir duración a mm:ss si es posible
+    if 'duration' in props:
+        try:
+            dur = float(props['duration'])
+            mins = int(dur // 60)
+            secs = int(dur % 60)
+            props['duration'] = f"{mins:02d}:{secs:02d}"
+        except Exception:
+            pass
+    return props
+
+def get_waveform(audio_path: str):
+    # Cargar audio
+    y, sr = librosa.load(audio_path, sr=None, mono=True)
+
+    # Número de "barras"
+    num_windows = 1000
+    hop_length = len(y) // num_windows
+
+    # Calcular solo máximos (parte positiva de la señal)
+    envelope = []
+    for i in range(num_windows):
+        start = i * hop_length
+        end = start + hop_length
+        segment = y[start:end]
+        if len(segment) > 0:
+            envelope.append(segment.max())
+
+    envelope = np.array(envelope)
+    times = np.linspace(0, len(y)/sr, num_windows)
+
+    # Crear figura Plotly
+    fig = go.Figure()
+
+    # Forma de onda positiva en amarillo
+    fig.add_trace(go.Scatter(
+        x=np.concatenate([times, times[::-1]]),
+        y=np.concatenate([np.zeros_like(envelope), envelope[::-1]]),  # desde 0 hasta max
+        fill="toself",
+        line=dict(color="yellow"),
+        fillcolor="yellow",
+        hoverinfo="skip",
+        showlegend=False
+    ))
+
+    # Configuración limpia y altura fija (100px)
+    fig.update_layout(
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        margin=dict(l=0, r=0, t=0, b=0),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        dragmode=False,
+        height=100  # altura de 100px
+    )
+
+    # Render en Streamlit
+    return st.plotly_chart(
+        fig, 
+        use_container_width=True, 
+        config= {
+            "staticPlot": True,
+            "displayModeBar": False
+        }
+    )
+
+def show_cover(uploaded_file, default_cover: str = None, size: int = 200):
+    """
+    Muestra el cover de un archivo de audio si está embebido en los metadatos.
+    
+    Args:
+        uploaded_file: archivo subido en st.file_uploader
+        default_cover: ruta a una imagen por defecto si no hay carátula
+        size: tamaño en píxeles del cover mostrado
+    """
+    try:
+        # TinyTag necesita el path o un buffer
+        tag = TinyTag.get(uploaded_file, image=True)
+
+        if tag.get_image():
+            image_data = tag.get_image()
+            image = Image.open(io.BytesIO(image_data))
+            return st.image(image, width=size)
+        elif default_cover:
+            return st.image(default_cover, width=size)
+        else:
+            # st.write("🎵 No se encontró portada")
+            return None
+    except Exception as e:
+        # st.write(f"⚠️ No se pudo leer la portada: {e}")
+        if default_cover:
+            return st.image(default_cover, width=size)
 
 ## TAGS
 
@@ -42,6 +153,13 @@ def get_df_tags_from_path(path: str) -> pd.DataFrame:
     path_songs = [file for file in Path(path).rglob('*') if file.is_file() and file.suffix.lower() in TinyTag.SUPPORTED_FILE_EXTENSIONS]
     tag_songs = [TinyTag.get(file).as_dict() for file in path_songs]
     return pd.DataFrame(tag_songs)
+
+
+
+## FFMPEG
+
+class MMFILE:
+    pass
 
 
 
@@ -121,6 +239,11 @@ class APPL:
         apple_tracks = APPL.get_tracks(url)
         df_local = get_df_tags_from_path(path)
         return [track for track in apple_tracks if not APPL.__check_duplicates(track, df_local)]
+    
+    @staticmethod
+    def get_not_duplicates_pl(playlist: list[dict], path: str):
+        df_local = get_df_tags_from_path(path)
+        return [track for track in playlist if not APPL.__check_duplicates(track, df_local)]
 
 
 
