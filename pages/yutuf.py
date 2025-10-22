@@ -32,6 +32,8 @@ if not 'yutuf_count' in st.session_state:
 
 logo = r'assets/yutuf.png'
 
+st.logo(logo, size='large')
+
 # st.logo(
 #     logo,
 #     # link=logo
@@ -44,10 +46,10 @@ logo = r'assets/yutuf.png'
 # )
 
 with st.sidebar:
-    st.image(
-        logo,
-        width=200
-    )
+    # st.image(
+    #     logo,
+    #     width=200
+    # )
     st.button('SET PATH', use_container_width=True)
 
 yutuf_path = st.text_input(
