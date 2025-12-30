@@ -1,6 +1,7 @@
 import os
 import subprocess
 import shutil
+import asyncio
 from pathlib import Path
 # from tinytag import TinyTag
 import pandas as pd
@@ -117,8 +118,12 @@ with st.expander('DOWNLOAD FROM URL', expanded=False):
 
                 url_type = APPL.Type.get_type(url_appl)
                 if url_type == APPL.Type.PLAYLIST or url_type == APPL.Type.ALBUM or url_type == APPL.Type.ARTIST:
-                    tracks = APPL.get_tracks(url_appl)
-                    tracks = APPL.get_not_duplicates(url_appl, path=path_appl)
+                    # tracks = APPL.get_tracks(url_appl)
+                    # tracks = APPL.get_not_duplicates(url_appl, path=path_appl)
+
+                    tracks = asyncio.run(
+                        APPL.get_not_duplicates(url_appl, path_appl)
+                    )
                     
                     item_placeholder = st.empty()
                     console_placeholder = st.empty()

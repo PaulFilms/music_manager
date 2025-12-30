@@ -10,7 +10,8 @@ import pandas as pd
 import numpy as np
 from tinytag import TinyTag
 import yt_dlp
-from gamdl.apple_music_api import AppleMusicApi
+# from gamdl.apple_music_api import AppleMusicApi
+from gamdl.api import AppleMusicApi
 from rapidfuzz import fuzz
 from PIL import Image
 import librosa
@@ -199,46 +200,129 @@ class APPL:
         match = re.search(r'/playlist/.+/([a-zA-Z0-9\.-]+)', url)
         return match.group(1) if match else None
 
+    # @staticmethod
+    # def get_tracks(url: str) -> List[Dict[str, Any]]:
+    #     api = AppleMusicApi(storefront='es')
+
+    #     url_type = APPL.Type.get_type(url)
+
+    #     if url_type == APPL.Type.PLAYLIST:
+    #         match = re.search(r'/playlist/.+/([a-zA-Z0-9\.-]+)', url)
+    #         playlist_id = match.group(1) if match else None
+    #         data = api.get_playlist(playlist_id)
+    #     elif url_type == APPL.Type.ALBUM:
+    #         match = re.search(r'/album/.+/(\d+)', url)
+    #         album_id = match.group(1) if match else None
+    #         data = api.get_album(album_id)
+    #     else:
+    #         raise ValueError("URL no soportada: debe ser playlist o álbum")
+        
+    #     tracks_data = data['relationships']['tracks']['data']
+    #     return [track['attributes'] for track in tracks_data]
+
     @staticmethod
-    def get_tracks(url: str) -> List[Dict[str, Any]]:
-        api = AppleMusicApi(storefront='es')
+    async def get_tracks(url: str):
+        api = await AppleMusicApi.create_from_netscape_cookies(
+            cookies_path="cookies.txt"
+        )
 
         url_type = APPL.Type.get_type(url)
 
         if url_type == APPL.Type.PLAYLIST:
             match = re.search(r'/playlist/.+/([a-zA-Z0-9\.-]+)', url)
             playlist_id = match.group(1) if match else None
-            data = api.get_playlist(playlist_id)
+            playlist = await api.get_playlist(playlist_id)
+            tracks = playlist.tracks
+
         elif url_type == APPL.Type.ALBUM:
             match = re.search(r'/album/.+/(\d+)', url)
             album_id = match.group(1) if match else None
-            data = api.get_album(album_id)
-        else:
-            raise ValueError("URL no soportada: debe ser playlist o álbum")
-        
-        tracks_data = data['relationships']['tracks']['data']
-        return [track['attributes'] for track in tracks_data]
+            album = await api.get_album(album_id)
+            tracks = album.tracks
 
-    def __check_duplicates(track_apple: dict, df_local: pd.DataFrame, threshold: float = 90) -> bool:
-        artista_a = track_apple["artistName"].lower()
-        titulo_a = track_apple["name"].lower()
+        elif url_type == APPL.Type.ARTIST:
+            match = re.search(r'/artist/.+/(\d+)', url)
+            artist_id = match.group(1) if match else None
+            artist = await api.get_artist(artist_id)
+            tracks = artist.tracks
+
+        else:
+            raise ValueError("URL no soportada")
+
+        return [
+            {
+                "name": t.name,
+                "artist": t.artist_name,
+                "album": t.album_name,
+                "duration_ms": t.duration_ms,
+                "isrc": t.isrc,
+                "url": t.url,
+            }
+            for t in tracks
+        ]
+
+
+    # def __check_duplicates(track_apple: dict, df_local: pd.DataFrame, threshold: float = 90) -> bool:
+    #     artista_a = track_apple["artistName"].lower()
+    #     titulo_a = track_apple["name"].lower()
+    #     objetivo = f"{artista_a} {titulo_a}"
+
+    #     for _, fila in df_local.iterrows():
+    #         artista_b = normalizar(fila["artist"])
+    #         titulo_b = normalizar(fila["title"])
+    #         candidato = f"{artista_b} {titulo_b}"
+    #         similitud = fuzz.token_set_ratio(objetivo, candidato)
+    #         if similitud >= threshold:
+    #             return True  # ya existe localmente
+        
+    #     return False
+
+    @staticmethod
+    def __check_duplicates(
+        track_apple: dict,
+        df_local: pd.DataFrame,
+        threshold: float = 90
+    ) -> bool:
+
+        # 1️⃣ ISRC exacto (si existe)
+        isrc_a = track_apple.get("isrc")
+        if isrc_a and "isrc" in df_local.columns:
+            if (df_local["isrc"] == isrc_a).any():
+                return True
+
+        # 2️⃣ Fuzzy matching (fallback)
+        artista_a = normalizar(track_apple["artist"])
+        titulo_a = normalizar(track_apple["name"])
         objetivo = f"{artista_a} {titulo_a}"
 
         for _, fila in df_local.iterrows():
             artista_b = normalizar(fila["artist"])
             titulo_b = normalizar(fila["title"])
             candidato = f"{artista_b} {titulo_b}"
+
             similitud = fuzz.token_set_ratio(objetivo, candidato)
+
             if similitud >= threshold:
-                return True  # ya existe localmente
-        
+                return True
+
         return False
 
+    # @staticmethod
+    # def get_not_duplicates(url: str, path: str):
+    #     apple_tracks = APPL.get_tracks(url)
+    #     df_local = get_df_tags_from_path(path)
+    #     return [track for track in apple_tracks if not APPL.__check_duplicates(track, df_local)]
+
     @staticmethod
-    def get_not_duplicates(url: str, path: str):
-        apple_tracks = APPL.get_tracks(url)
+    async def get_not_duplicates(url: str, path: str):
+        apple_tracks = await APPL.get_tracks(url)
         df_local = get_df_tags_from_path(path)
-        return [track for track in apple_tracks if not APPL.__check_duplicates(track, df_local)]
+
+        return [
+            track
+            for track in apple_tracks
+            if not APPL.__check_duplicates(track, df_local)
+        ]
     
     @staticmethod
     def get_not_duplicates_pl(playlist: list[dict], path: str):

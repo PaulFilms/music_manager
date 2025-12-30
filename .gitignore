@@ -176,9 +176,13 @@ cython_debug/
 
 
 # APP
+ffmpeg
 cookies.txt
 Apple Music/
 yutuf/
 temp/
+test.py
+*.ipynb
 .secrets/
 .path
+gamdl_temp*

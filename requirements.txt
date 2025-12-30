@@ -1,4 +1,4 @@
 streamlit
 ffmpeg-python
-librosa
+librosa # for audio processing
 matplotlib
