@@ -7,6 +7,9 @@ from dataclasses import dataclass, fields
 # import music_tag
 from tinytag import TinyTag
 from functions import get_waveform, show_cover, get_audio_properties
+from frontend import song_player
+from easy_st_aggrid import col_base, col_text, col_date, col_checkbox, easy_table
+
 
 st.image(
     r'assets/download_folder_file_icon_219533.ico',
@@ -52,7 +55,7 @@ def set_source_path(old_path: str):
 
 st.sidebar.button(
     'SET LOCAL FILES', 
-    use_container_width=True, 
+    width='stretch', 
     # on_click=lambda: st.session_state.update(source_path=None)
     on_click=lambda: set_source_path(st.session_state.source_path),
     icon="📂",
@@ -88,6 +91,11 @@ st.sidebar.button(
 #     ):
 #     set_source_path(st.session_state.source_path)
 
+def list_to_string(value):
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    return value
+
 def get_songs(path: str):
     songs = [file for file in Path(path).rglob('*') if file.is_file() and file.suffix.lower() in TinyTag.SUPPORTED_FILE_EXTENSIONS]
     data_songs = [TinyTag.get(file).as_dict() for file in songs]
@@ -98,6 +106,7 @@ def get_songs(path: str):
         selection_mode='single-row',
         on_select='rerun'
     )
+    df = df.applymap(list_to_string)
     return df
 
 if st.session_state.source_path:
@@ -143,6 +152,7 @@ if st.session_state.source_path:
         songs = [file for file in Path(songs_path).rglob('*') if file.is_file() and file.suffix.lower() in TinyTag.SUPPORTED_FILE_EXTENSIONS]
         data_songs = [TinyTag.get(file).as_dict() for file in songs]
         df_songs = pd.DataFrame(data_songs)
+        df_songs = df_songs.map(list_to_string)
 
         # col1, col2 = st.columns([3,1])
         # with col1.popover('Fields', icon='🗄️'): #, use_container_width=True): # expanded=False, 
@@ -159,7 +169,9 @@ if st.session_state.source_path:
         #         label_visibility='collapsed',
         #     )
 
-        with st.popover('OPTIONS', icon='⚙️'):
+        col1, col2, col3 = st.columns([4, 3, 1])
+
+        with col3.popover('OPTIONS', icon='⚙️', type='secondary', width='stretch'):
 
             n_rows = st.segmented_control(
                 'Lines', 
@@ -171,13 +183,14 @@ if st.session_state.source_path:
 
             default_fields = ['artist', 'title', 'album', 'year', 'genre']
             default_fields = [field for field in default_fields if field in df_songs.columns]
+            
             tbl_fields = st.multiselect(
                 'FIELDS',
                 options=df_songs.columns,
                 default=default_fields,
                 # key='fields1',
                 label_visibility='visible',
-                # use_container_width=True,
+                width='stretch',
             )
 
             filter = st.text_input(
@@ -186,6 +199,7 @@ if st.session_state.source_path:
                 label_visibility='visible',
                 icon='🔍',
             )
+
 
         dividers = len(df_songs)/n_rows
         counter = 0
@@ -204,6 +218,16 @@ if st.session_state.source_path:
             selection_mode='single-row',
             on_select='rerun'
         )
+
+        columns_list = [col_text(f, filter=True) for f in tbl_fields]
+        columns_list.insert(0, col_checkbox())
+
+        selection = easy_table(
+            dataframe=filtered_df, 
+            height=700,
+            columns_list=columns_list
+        )
+
         # col1, col2, col3 = st.columns([4,1,1])
         # from_ = st.session_state.counter * n_rows
         # to_ = from_ + n_rows
@@ -217,26 +241,19 @@ if st.session_state.source_path:
         #     if st.session_state.counter < int(f'{dividers:.0f}'):
         #         st.session_state.counter += 1
 
-        if len(st_song.selection['rows']) > 0:
-            indx = st_song.selection['rows'][0]
-            path_song = df_songs.iloc[indx]['filename']
+        ## PLAYER
+        # if len(st_song.selection['rows']) > 0:
+        #     indx = st_song.selection['rows'][0]
+        #     path_song = df_songs.iloc[indx]['filename']
 
-            with st.container(border=True):
-                col_cover, col_waveform = st.columns([1,5])
-                with col_cover:
-                    show_cover(path_song, size=100)
-                with col_waveform:
-                    get_waveform(path_song)
-                st.audio(path_song)
-                props = get_audio_properties(path_song)
-                props_str = " | ".join([f"{k.upper()}: {v}" for k, v in props.items()])
-                st.text(props_str)
+        #     song_player(path_song)
 
-        #     # st.header('🎹 SONG', divider=True)
+        if selection.selected_rows_id:
+            indx = selection.selected_rows_id[0]
+            print(indx)
+            path_song = df_songs.iloc[int(indx)]['filename']
 
-        #     st.write('TAGS')
-        #     st.write('MOVE')
-        #     st.write('MAKE BACKUP')
+            song_player(path_song)
 
 
 
@@ -249,3 +266,51 @@ import streamlit.components.v1 as components
 # Lectura del archivo HTML local
 # html_code = open("check-file-manager.html", "r", encoding="utf-8").read()
 # components.html(html_code, height=600)
+
+import streamlit.components.v1 as components
+import uuid
+from pathlib import Path
+
+def wavesurfer_player(audio_path: str, height=120):
+    element_id = f"waveform-{uuid.uuid4().hex}"
+    audio_path = Path(audio_path).as_posix()
+
+    html = f"""
+    <div style="width:100%;">
+        <div id="{element_id}" style="height:{height}px;"></div>
+
+        <div style="margin-top:6px;">
+            <button id="{element_id}-play">▶️ / ⏸</button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+    <script>
+      const ws_{element_id} = WaveSurfer.create({{
+        container: "#{element_id}",
+        waveColor: "#555",
+        progressColor: "#facc15",
+        cursorColor: "#facc15",
+        barWidth: 2,
+        barGap: 1,
+        height: {height},
+        normalize: true,
+      }});
+
+      ws_{element_id}.load("{audio_path}");
+
+      document.getElementById("{element_id}-play")
+        .addEventListener("click", () => {{
+          ws_{element_id}.playPause();
+        }});
+    </script>
+    """
+
+    components.html(html, height=height + 50)
+    print('pass')
+
+st.title("🎧 DJ Player")
+
+wavesurfer_player(
+    "/Volumes/BK250_APFS/[MUSIC DJ]/[ELECTRO]/02 Bushido.m4a"
+)

@@ -2,6 +2,7 @@ import os, re, unicodedata, subprocess, io
 from pathlib import Path
 from time import sleep
 from enum import Enum
+from dataclasses import dataclass
 from urllib.parse import urlparse, parse_qs, urlunparse, unquote
 from typing import List, Dict, Any
 
@@ -35,7 +36,7 @@ def clean_filename(name: str) -> str:
 
 common_formats = ['.aac', '.flac', '.m4a', '.mp3', '.ogg', '.opus', '.wav']
 
-def get_audio_properties(file_path):
+def get_audio_properties(file_path) -> Dict[str, Any]:
     cmd = [
         "ffprobe",
         "-v", "error",
@@ -49,7 +50,11 @@ def get_audio_properties(file_path):
         if '=' in line:
             k, v = line.strip().split('=', 1)
             props[k] = v
+    
+    if 'sample_rate' in props:
+        props['sample_rate'] = f"{props['sample_rate']} Hz"
     # Convertir duración a mm:ss si es posible
+    
     if 'duration' in props:
         try:
             dur = float(props['duration'])
@@ -58,6 +63,18 @@ def get_audio_properties(file_path):
             props['duration'] = f"{mins:02d}:{secs:02d}"
         except Exception:
             pass
+    
+    try:
+        size = os.path.getsize(file_path)
+        if size > 1e9: size = f'{size/1e9:.2f} GB'
+        elif size > 1e6: size = f'{size/1e6:.2f} MB'
+        elif size > 1e3: size = f'{size/1e3:.2f} kB'
+        else:
+            size = f'{size:.2f} B'
+        props['size'] = size
+    except Exception:
+        pass
+
     return props
 
 def get_waveform(audio_path: str):
@@ -108,39 +125,12 @@ def get_waveform(audio_path: str):
     # Render en Streamlit
     return st.plotly_chart(
         fig, 
-        use_container_width=True, 
+        width='stretch', 
         config= {
             "staticPlot": True,
             "displayModeBar": False
         }
     )
-
-def show_cover(uploaded_file, default_cover: str = None, size: int = 200):
-    """
-    Muestra el cover de un archivo de audio si está embebido en los metadatos.
-    
-    Args:
-        uploaded_file: archivo subido en st.file_uploader
-        default_cover: ruta a una imagen por defecto si no hay carátula
-        size: tamaño en píxeles del cover mostrado
-    """
-    try:
-        # TinyTag necesita el path o un buffer
-        tag = TinyTag.get(uploaded_file, image=True)
-
-        if tag.get_image():
-            image_data = tag.get_image()
-            image = Image.open(io.BytesIO(image_data))
-            return st.image(image, width=size)
-        elif default_cover:
-            return st.image(default_cover, width=size)
-        else:
-            # st.write("🎵 No se encontró portada")
-            return None
-    except Exception as e:
-        # st.write(f"⚠️ No se pudo leer la portada: {e}")
-        if default_cover:
-            return st.image(default_cover, width=size)
 
 ## TAGS
 
@@ -155,7 +145,32 @@ def get_df_tags_from_path(path: str) -> pd.DataFrame:
     tag_songs = [TinyTag.get(file).as_dict() for file in path_songs]
     return pd.DataFrame(tag_songs)
 
+@dataclass
+class track_check:
+    artist: str
+    name: str
 
+def check_duplicates(
+        track: track_check,
+        df_local: pd.DataFrame,
+        threshold: float = 80,
+        ) -> bool:
+    
+    artista_a = normalizar(track.artist)
+    titulo_a = normalizar(track.name)
+    objetivo = f"{artista_a} {titulo_a}"
+
+    for _, fila in df_local.iterrows():
+        artista_b = normalizar(fila["artist"])
+        titulo_b = normalizar(fila["title"])
+        candidato = f"{artista_b} {titulo_b}"
+
+        similitud = fuzz.token_set_ratio(objetivo, candidato)
+
+        if similitud >= threshold:
+            return True
+
+    return False
 
 ## FFMPEG
 
@@ -168,168 +183,115 @@ class MMFILE:
 
 class APPL:
     
-    class Type(Enum):
-        PLAYLIST = 'playlist'
-        ALBUM = 'album'
-        ARTIST = 'artist'
-        SONG = 'song'
+    class URLType(str, Enum):
+        TRACK = "track"
         MUSIC_VIDEO = 'music-video'
+        ALBUM = "album"
+        PLAYLIST = "playlist"
+        ARTIST = "artist"
 
-        @staticmethod
-        def get_type(url: str) -> 'APPL.Type':
-            url = unquote(url).lower().rstrip('/')
+        @classmethod
+        def get_type(cls, url: str) -> 'APPL.URLType':
+            url = unquote(url).lower().rstrip("/")
             parsed = urlparse(url)
-            query_params = parse_qs(parsed.query)
-            query = f"i={query_params['i'][0]}" if 'i' in query_params else ''
-            url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', query, ''))
-    
-            if re.search(r'/playlist/[^/]+/pl\.[A-Za-z0-9\-]+$', url):
-                return APPL.Type.PLAYLIST
-            if re.search(r'/album/[^/]+/\d+\?i=\d+$', url):
-                return APPL.Type.SONG
-            if re.search(r'/album/[^/]+/\d+$', url):
-                return APPL.Type.ALBUM
-            if re.search(r'/artist/[^/]+/\d+$', url):
-                return APPL.Type.ARTIST
-            if re.search(r'/music-video/[^/]+/\d+$', url):
-                return APPL.Type.MUSIC_VIDEO
+            path = parsed.path
+
+            if parsed.query:
+                return cls.TRACK
+            
+            if cls.ALBUM in path:
+                return cls.ALBUM
+            
+            if cls.PLAYLIST in path:
+                return cls.PLAYLIST
+            
+            if cls.ARTIST in path:
+                return cls.ARTIST
+            
+            if cls.MUSIC_VIDEO in path:
+                return cls.MUSIC_VIDEO
+
             return None
 
     @staticmethod
-    def __get_playlist_id(url: str) -> str:
-        match = re.search(r'/playlist/.+/([a-zA-Z0-9\.-]+)', url)
-        return match.group(1) if match else None
-
-    # @staticmethod
-    # def get_tracks(url: str) -> List[Dict[str, Any]]:
-    #     api = AppleMusicApi(storefront='es')
-
-    #     url_type = APPL.Type.get_type(url)
-
-    #     if url_type == APPL.Type.PLAYLIST:
-    #         match = re.search(r'/playlist/.+/([a-zA-Z0-9\.-]+)', url)
-    #         playlist_id = match.group(1) if match else None
-    #         data = api.get_playlist(playlist_id)
-    #     elif url_type == APPL.Type.ALBUM:
-    #         match = re.search(r'/album/.+/(\d+)', url)
-    #         album_id = match.group(1) if match else None
-    #         data = api.get_album(album_id)
-    #     else:
-    #         raise ValueError("URL no soportada: debe ser playlist o álbum")
-        
-    #     tracks_data = data['relationships']['tracks']['data']
-    #     return [track['attributes'] for track in tracks_data]
+    def extract_single_track(data: dict) -> list[dict]:
+        try:
+            return [data["data"][0]["attributes"]]
+        except (KeyError, IndexError):
+            return []
 
     @staticmethod
-    async def get_tracks(url: str):
+    def extract_tracks(data: dict) -> list[dict]:
+        # ["data"][0]["relationships"]["tracks"]["data"][0]["attributes"].keys()
+        try:
+            items = (
+                data["data"][0]
+                .get("relationships", {})
+                .get("tracks", {})
+                .get("data", [])
+            )
+        except (KeyError, IndexError):
+            return []
+        
+        tracks = []
+
+        for t in items:
+            attr = t.get("attributes", {})
+            tracks.append(attr)
+
+        return tracks
+
+    async def get_tracks(url: str, cookies_path: str):
+        url_type = APPL.URLType.get_type(url)
+        parsed = urlparse(url)
+        path = parsed.path
+        parts = path.strip("/").split("/")
+        
+        collection_id = parts[-1]
+
         api = await AppleMusicApi.create_from_netscape_cookies(
-            cookies_path="cookies.txt"
+            cookies_path=cookies_path
         )
 
-        url_type = APPL.Type.get_type(url)
+        if url_type == APPL.URLType.TRACK:
+            query = parse_qs(parsed.query)
+            song_id = query.get("i", [None])[0]
+            data = await api.get_song(song_id)
+            return APPL.extract_single_track(data)
 
-        if url_type == APPL.Type.PLAYLIST:
-            match = re.search(r'/playlist/.+/([a-zA-Z0-9\.-]+)', url)
-            playlist_id = match.group(1) if match else None
-            playlist = await api.get_playlist(playlist_id)
-            tracks = playlist.tracks
-
-        elif url_type == APPL.Type.ALBUM:
-            match = re.search(r'/album/.+/(\d+)', url)
-            album_id = match.group(1) if match else None
-            album = await api.get_album(album_id)
-            tracks = album.tracks
-
-        elif url_type == APPL.Type.ARTIST:
-            match = re.search(r'/artist/.+/(\d+)', url)
-            artist_id = match.group(1) if match else None
-            artist = await api.get_artist(artist_id)
-            tracks = artist.tracks
-
-        else:
-            raise ValueError("URL no soportada")
-
-        return [
-            {
-                "name": t.name,
-                "artist": t.artist_name,
-                "album": t.album_name,
-                "duration_ms": t.duration_ms,
-                "isrc": t.isrc,
-                "url": t.url,
-            }
-            for t in tracks
-        ]
-
-
-    # def __check_duplicates(track_apple: dict, df_local: pd.DataFrame, threshold: float = 90) -> bool:
-    #     artista_a = track_apple["artistName"].lower()
-    #     titulo_a = track_apple["name"].lower()
-    #     objetivo = f"{artista_a} {titulo_a}"
-
-    #     for _, fila in df_local.iterrows():
-    #         artista_b = normalizar(fila["artist"])
-    #         titulo_b = normalizar(fila["title"])
-    #         candidato = f"{artista_b} {titulo_b}"
-    #         similitud = fuzz.token_set_ratio(objetivo, candidato)
-    #         if similitud >= threshold:
-    #             return True  # ya existe localmente
+        if url_type == APPL.URLType.PLAYLIST:
+            data = await api.get_playlist(collection_id, limit_tracks=300)
+            return APPL.extract_tracks(data)
         
-    #     return False
+        if url_type == APPL.URLType.ALBUM:
+            data = await api.get_album(collection_id)
+            return APPL.extract_tracks(data)
+        
+        if url_type == APPL.URLType.ARTIST:
+            artist = await api.get_artist(collection_id)
+            albums = (
+                artist["data"][0]
+                .get("relationships", {})
+                .get("albums", {})
+                .get("data", [])
+            )
+
+            tracks = []
+            for a in albums:
+                tracks.extend(await APPL.get_tracks(a["attributes"]["url"]))
+
+            return tracks
+        
+        return []
 
     @staticmethod
-    def __check_duplicates(
-        track_apple: dict,
-        df_local: pd.DataFrame,
-        threshold: float = 90
-    ) -> bool:
-
-        # 1️⃣ ISRC exacto (si existe)
-        isrc_a = track_apple.get("isrc")
-        if isrc_a and "isrc" in df_local.columns:
-            if (df_local["isrc"] == isrc_a).any():
-                return True
-
-        # 2️⃣ Fuzzy matching (fallback)
-        artista_a = normalizar(track_apple["artist"])
-        titulo_a = normalizar(track_apple["name"])
-        objetivo = f"{artista_a} {titulo_a}"
-
-        for _, fila in df_local.iterrows():
-            artista_b = normalizar(fila["artist"])
-            titulo_b = normalizar(fila["title"])
-            candidato = f"{artista_b} {titulo_b}"
-
-            similitud = fuzz.token_set_ratio(objetivo, candidato)
-
-            if similitud >= threshold:
-                return True
-
-        return False
-
-    # @staticmethod
-    # def get_not_duplicates(url: str, path: str):
-    #     apple_tracks = APPL.get_tracks(url)
-    #     df_local = get_df_tags_from_path(path)
-    #     return [track for track in apple_tracks if not APPL.__check_duplicates(track, df_local)]
-
-    @staticmethod
-    async def get_not_duplicates(url: str, path: str):
-        apple_tracks = await APPL.get_tracks(url)
-        df_local = get_df_tags_from_path(path)
-
-        return [
-            track
-            for track in apple_tracks
-            if not APPL.__check_duplicates(track, df_local)
+    def get_track(url: str) -> None:
+        cmd = [
+            "gamdl",
+            url
         ]
-    
-    @staticmethod
-    def get_not_duplicates_pl(playlist: list[dict], path: str):
-        df_local = get_df_tags_from_path(path)
-        return [track for track in playlist if not APPL.__check_duplicates(track, df_local)]
-
-
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result
 
 ## YUTUF
 
@@ -414,3 +376,56 @@ class YUTUF:
             # st.rerun()
         
         return None
+
+
+## TEST
+
+# import soundfile as sf
+# import numpy as np
+# import plotly.graph_objects as go
+# import streamlit as st
+
+# def get_waveform(audio_path: str):
+#     y, sr = sf.read(audio_path, dtype="float32")
+
+#     # Si es estéreo → mono
+#     if y.ndim > 1:
+#         y = y.mean(axis=1)
+
+#     num_windows = 1000
+#     hop_length = len(y) // num_windows
+
+#     # Envelope (max absoluto, más correcto visualmente)
+#     envelope = np.maximum.reduceat(
+#         np.abs(y),
+#         np.arange(0, len(y), hop_length)
+#     )[:num_windows]
+
+#     times = np.linspace(0, len(y) / sr, len(envelope))
+
+#     fig = go.Figure()
+#     fig.add_trace(go.Scatter(
+#         x=np.concatenate([times, times[::-1]]),
+#         y=np.concatenate([np.zeros_like(envelope), envelope[::-1]]),
+#         fill="toself",
+#         line=dict(color="yellow"),
+#         fillcolor="yellow",
+#         hoverinfo="skip",
+#         showlegend=False
+#     ))
+
+#     fig.update_layout(
+#         xaxis=dict(visible=False),
+#         yaxis=dict(visible=False),
+#         margin=dict(l=0, r=0, t=0, b=0),
+#         plot_bgcolor="rgba(0,0,0,0)",
+#         paper_bgcolor="rgba(0,0,0,0)",
+#         dragmode=False,
+#         height=100
+#     )
+
+#     return st.plotly_chart(
+#         fig,
+#         width="stretch",
+#         config={"staticPlot": True, "displayModeBar": False}
+#     )
