@@ -2,3 +2,8 @@ streamlit
 ffmpeg-python
 librosa # for audio processing
 matplotlib
+streamlit-file-browser
+RapidFuzz
+
+yt_dlp
+gamdl

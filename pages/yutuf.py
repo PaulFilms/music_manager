@@ -50,7 +50,7 @@ with st.sidebar:
     #     logo,
     #     width=200
     # )
-    st.button('SET PATH', use_container_width=True)
+    st.button('SET PATH', width='stretch')
 
 yutuf_path = st.text_input(
     label='path',
@@ -129,7 +129,7 @@ if os.path.exists(yutuf_path):
         files_df,
         # pd.DataFrame(files, columns=['file']),
         hide_index=True,
-        use_container_width=True,
+        width='stretch',
         selection_mode='single-row',
         on_select='rerun'
     )
@@ -140,9 +140,9 @@ if os.path.exists(yutuf_path):
 
         ## OPTIONS
         with st.popover('OPTIONS', icon='⚙️'):
-            if st.button('Refresh', use_container_width=True, icon='🔄'):
+            if st.button('Refresh', width='stretch', icon='🔄'):
                 st.rerun()
-            st.button('Audio Converter', use_container_width=True)
+            st.button('Audio Converter', width='stretch')
 
         # Mostrar miniatura si es video
         st.write(Path(file_path).stem)
@@ -152,7 +152,7 @@ if os.path.exists(yutuf_path):
             st.image(
                 jpg_path,
                 caption='Miniatura',
-                use_container_width=True
+                width='stretch'
             )
 
         ## AUDIO

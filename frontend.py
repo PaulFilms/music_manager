@@ -3,6 +3,19 @@ import streamlit as st
 from functions import get_waveform, get_audio_properties
 from tinytag import TinyTag
 from PIL import Image
+import json
+
+def config_save(data):
+    with open("config.json", "w") as f:
+        json.dump(data, f)
+
+def config_load():
+    try:
+        with open("config.json") as f:
+            return json.load(f)
+    except:
+        return {}
+
 
 def show_cover(uploaded_file, default_cover: str = None, size: int = 200):
     """

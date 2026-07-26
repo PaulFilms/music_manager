@@ -1,4 +1,4 @@
-import os, re, unicodedata, subprocess, io
+import os, re, unicodedata, subprocess, io, asyncio
 from pathlib import Path
 from time import sleep
 from enum import Enum
@@ -241,7 +241,10 @@ class APPL:
 
         return tracks
 
-    async def get_tracks(url: str, cookies_path: str):
+    async def get_tracks(url: str, cookies_path: str) -> List[Dict]:
+        ''' 
+        Returns a list of tracks from selected url
+        '''
         url_type = APPL.URLType.get_type(url)
         parsed = urlparse(url)
         path = parsed.path
@@ -284,14 +287,32 @@ class APPL:
         
         return []
 
-    @staticmethod
-    def get_track(url: str) -> None:
-        cmd = [
+    # @staticmethod
+    # def get_track(url: str) -> None:
+    #     cmd = [
+    #         "gamdl",
+    #         url
+    #     ]
+    #     result = subprocess.run(cmd, capture_output=True, text=True)
+    #     return result
+
+    # @staticmethod
+    async def get_track(url: str):
+        process = await asyncio.create_subprocess_exec(
             "gamdl",
-            url
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        return result
+            url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        stdout, stderr = await process.communicate()
+
+        return {
+            "returncode": process.returncode,
+            "stdout": stdout.decode(),
+            "stderr": stderr.decode()
+        }
+
 
 ## YUTUF
 

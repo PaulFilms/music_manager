@@ -6,7 +6,7 @@ st.title("Explorador de Archivos")
 
 # Define el path inicial desde donde quieres empezar
 start_path = '/Volumes/BK250_APFS/[MUSIC DJ]'  # <-- cámbialo a tu carpeta base
-
+start_path = "/home/pgp/Documents/Share/[MUSIC CONSOLIDED]"
 # event = st_file_browser(
 #     start_path,        # carpeta inicial
 #     key="file_browser" # clave única (necesaria si usas más de un browser)
