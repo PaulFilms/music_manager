@@ -53,6 +53,7 @@ if TYPE_CHECKING:
 import re
 import unicodedata
 from pathlib import Path
+from datetime import datetime
 from dataclasses import dataclass, field
 from collections.abc import Iterable
 from typing import Any
@@ -120,7 +121,7 @@ def normalize(value: Any) -> str:
 
     value = SPACE_RE.sub(" ", value).strip()
 
-    value = SEPARATOR_RE.sub("_", value)
+    value = SEPARATOR_RE.sub(" ", value)
 
     value = value.strip("_")
 
@@ -240,3 +241,43 @@ class TrackCheck:
                 return True
         return False
 
+
+CONSOLIDATED_PREFIX = "#mngr-"
+
+def consolidated_signature() -> str:
+    return f"{CONSOLIDATED_PREFIX}{datetime.now():%Y%m%d}"
+
+def update_comment(comment: str | list[str] | None) -> list[str]:
+    """
+    Mantiene comentarios existentes y añade/reemplaza la firma mngr.
+    """
+
+    signature = consolidated_signature()
+
+    if comment is None:
+        comments = []
+
+    elif isinstance(comment, str):
+        comments = [comment]
+
+    else:
+        comments = list(comment)
+
+    # eliminar firmas antiguas
+    comments = [
+        c
+        for c in comments
+        if not c.startswith(CONSOLIDATED_PREFIX)
+    ]
+
+    comments.append(signature)
+
+    return comments
+
+def consolided_file(path: str) -> None:
+    tags: dict[str, Any] = get_tags(path) # validado / tinytag
+    filename = get_filename_from_tags(tags, mode=0) # modes: 0. Single / 1. Album
+    # Despues implementare añadir un count para duplicados
+    oldfile = Path(path)
+    oldfile.rename(filename)
+    consolided_tag(filename)
