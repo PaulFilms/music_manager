@@ -57,7 +57,9 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from collections.abc import Iterable
 from typing import Any
-from tinytag import TinyTag
+from mutagen import File as MutagenFile
+from mutagen.id3 import ID3Tags
+from mutagen.mp4 import MP4Tags
 from rapidfuzz import fuzz
 
 
@@ -133,17 +135,196 @@ def normalize(value: Any) -> str:
 
     return value[:MAX_LENGTH]
 
-def get_tags(path: str) -> dict[str, any]:
-    PATH = Path(path)
-    if not PATH.suffix.lower() in TinyTag.SUPPORTED_FILE_EXTENSIONS:
+## ── Tag key mappings ──────────────────────────────────────────────────────────
+
+# ID3 (MP3, AIFF): frame_id → normalized key
+_ID3_MAP: dict[str, str] = {
+    "TIT2": "title",
+    "TIT3": "subtitle",
+    "TPE1": "artist",
+    "TPE2": "albumartist",
+    "TALB": "album",
+    "TRCK": "track",
+    "TPOS": "disc",
+    "TCON": "genre",
+    "TDRC": "year",
+    "TCOM": "composer",
+    "TLEN": "duration_ms",
+    "TBPM": "bpm",
+    "COMM": "comment",
+    "USLT": "lyrics",
+    "APIC": "cover",
+}
+
+# MP4/M4A (iTunes atoms): atom → normalized key
+_MP4_MAP: dict[str, str] = {
+    "©nam": "title",
+    "©ART": "artist",
+    "aART": "albumartist",
+    "©alb": "album",
+    "trkn": "track",
+    "disk": "disc",
+    "©gen": "genre",
+    "gnre": "genre",
+    "©day": "year",
+    "©wrt": "composer",
+    "tmpo": "bpm",
+    "©cmt": "comment",
+    "©lyr": "lyrics",
+    "covr": "cover",
+    "soal": "album_sort",
+    "soar": "artist_sort",
+    "sonm": "title_sort",
+}
+
+# VorbisComment (FLAC, OGG, Opus): uppercase key → normalized key
+_VORBIS_MAP: dict[str, str] = {
+    "TITLE":        "title",
+    "ARTIST":       "artist",
+    "ALBUMARTIST":  "albumartist",
+    "ALBUM":        "album",
+    "TRACKNUMBER":  "track",
+    "DISCNUMBER":   "disc",
+    "GENRE":        "genre",
+    "DATE":         "year",
+    "COMPOSER":     "composer",
+    "BPM":          "bpm",
+    "COMMENT":      "comment",
+    "LYRICS":       "lyrics",
+    "METADATA_BLOCK_PICTURE": "cover",
+}
+
+SUPPORTED_EXTENSIONS = {
+    ".mp3", ".mp4", ".m4a", ".m4b", ".m4p",
+    ".flac", ".ogg", ".oga", ".opus",
+    ".wav", ".aiff", ".aif", ".wv", ".ape",
+}
+
+
+def _first(value: Any) -> Any:
+    """Unwrap single-element lists returned by mutagen."""
+    if isinstance(value, (list, tuple)) and value:
+        return value[0]
+    return value
+
+
+def _extract_id3(tags: ID3Tags) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for frame_id, key in _ID3_MAP.items():
+        # COMM and USLT frames can have lang suffixes → iterate all
+        frames = tags.getall(frame_id)
+        if not frames:
+            continue
+        frame = frames[0]
+        if key == "cover":
+            result[key] = getattr(frame, "data", None)
+        elif key == "comment":
+            result[key] = getattr(frame, "text", str(frame))
+        elif hasattr(frame, "text"):
+            raw = frame.text
+            result[key] = str(_first(raw)) if raw else None
+        else:
+            result[key] = str(frame)
+    return result
+
+
+def _extract_mp4(tags: MP4Tags) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for atom, key in _MP4_MAP.items():
+        if atom not in tags:
+            continue
+        value = _first(tags[atom])
+        if key == "cover":
+            result[key] = bytes(value) if value is not None else None
+        elif key in ("track", "disc") and isinstance(value, tuple):
+            # MP4 stores (number, total) as a tuple
+            result[key] = str(value[0]) if value[0] else None
+            total_key = "track_total" if key == "track" else "disc_total"
+            result[total_key] = str(value[1]) if len(value) > 1 and value[1] else None
+        else:
+            result[key] = str(value) if value is not None else None
+    return result
+
+
+def _extract_vorbis(tags: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for vorbis_key, key in _VORBIS_MAP.items():
+        raw = tags.get(vorbis_key) or tags.get(vorbis_key.lower())
+        if not raw:
+            continue
+        if key == "cover":
+            result[key] = _first(raw)
+        else:
+            result[key] = str(_first(raw))
+    return result
+
+
+def _extract_info(audio: Any) -> dict[str, Any]:
+    """Extract audio stream properties from mutagen's info object."""
+    info = getattr(audio, "info", None)
+    if info is None:
+        return {}
+    props: dict[str, Any] = {}
+    for attr in ("length", "bitrate", "sample_rate", "channels", "bits_per_sample"):
+        val = getattr(info, attr, None)
+        if val is not None:
+            props[attr] = val
+    return props
+
+
+def get_tags(path: str) -> dict[str, Any] | None:
+    """
+    Extract tags from an audio file using mutagen.
+
+    Supports MP3, MP4/M4A, FLAC, OGG, Opus, WAV, AIFF and more.
+    Returns a normalized dict with consistent keys regardless of format,
+    plus audio stream info (length, bitrate, sample_rate, channels).
+    Returns None if the file format is unsupported.
+
+    Normalized tag keys
+    -------------------
+    title, artist, albumartist, album, track, track_total,
+    disc, disc_total, genre, year, composer, bpm, comment,
+    lyrics, cover (bytes), album_sort, artist_sort, title_sort
+
+    Audio info keys
+    ---------------
+    length (seconds), bitrate (bps), sample_rate (Hz),
+    channels, bits_per_sample
+    """
+    suffix = Path(path).suffix.lower()
+    if suffix not in SUPPORTED_EXTENSIONS:
         return None
-    return TinyTag.get(path).as_dict()
+
+    audio = MutagenFile(path, easy=False)
+    if audio is None:
+        return None
+
+    tags = audio.tags
+    tag_data: dict[str, Any] = {}
+
+    if tags is not None:
+        if isinstance(tags, ID3Tags):
+            tag_data = _extract_id3(tags)
+        elif isinstance(tags, MP4Tags):
+            tag_data = _extract_mp4(tags)
+        else:
+            # VorbisComment (FLAC, OGG, Opus) and others share a dict-like interface
+            tag_data = _extract_vorbis(tags)
+
+    result = {**_extract_info(audio), **tag_data}
+    return result
+
 
 def get_df_tags_from_path(path: str) -> _pd.DataFrame:
     from ._optional import pandas; pd = pandas()
 
-    path_songs = [file for file in Path(path).rglob('*') if file.is_file() and file.suffix.lower() in TinyTag.SUPPORTED_FILE_EXTENSIONS]
-    tag_songs = [TinyTag.get(file).as_dict() for file in path_songs]
+    path_songs = [
+        file for file in Path(path).rglob("*")
+        if file.is_file() and file.suffix.lower() in SUPPORTED_EXTENSIONS
+    ]
+    tag_songs = [get_tags(str(file)) for file in path_songs]
+    tag_songs = [t for t in tag_songs if t is not None]
     return pd.DataFrame(tag_songs)
 
 def get_filename_from_tags(tags: dict[str, Any], mode: int = 0) -> str:
