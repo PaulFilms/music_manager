@@ -208,23 +208,38 @@ def _first(value: Any) -> Any:
     return value
 
 
+def _is_empty(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, (str, bytes)):
+        return len(value) == 0
+    if isinstance(value, (list, tuple)):
+        return len(value) == 0
+    return False
+
+
+def _add_if_present(result: dict[str, Any], key: str, value: Any) -> None:
+    if not _is_empty(value):
+        result[key] = value
+
+
 def _extract_id3(tags: ID3Tags) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for frame_id, key in _ID3_MAP.items():
-        # COMM and USLT frames can have lang suffixes → iterate all
         frames = tags.getall(frame_id)
         if not frames:
             continue
         frame = frames[0]
         if key == "cover":
-            result[key] = getattr(frame, "data", None)
+            value = getattr(frame, "data", None)
         elif key == "comment":
-            result[key] = getattr(frame, "text", str(frame))
+            value = getattr(frame, "text", str(frame))
         elif hasattr(frame, "text"):
             raw = frame.text
-            result[key] = str(_first(raw)) if raw else None
+            value = str(_first(raw)) if raw else None
         else:
-            result[key] = str(frame)
+            value = str(frame)
+        _add_if_present(result, key, value)
     return result
 
 
@@ -235,14 +250,16 @@ def _extract_mp4(tags: MP4Tags) -> dict[str, Any]:
             continue
         value = _first(tags[atom])
         if key == "cover":
-            result[key] = bytes(value) if value is not None else None
+            value = bytes(value) if value is not None else None
         elif key in ("track", "disc") and isinstance(value, tuple):
             # MP4 stores (number, total) as a tuple
-            result[key] = str(value[0]) if value[0] else None
+            _add_if_present(result, key, str(value[0]) if value[0] else None)
             total_key = "track_total" if key == "track" else "disc_total"
-            result[total_key] = str(value[1]) if len(value) > 1 and value[1] else None
+            _add_if_present(result, total_key, str(value[1]) if len(value) > 1 and value[1] else None)
+            continue
         else:
-            result[key] = str(value) if value is not None else None
+            value = str(value) if value is not None else None
+        _add_if_present(result, key, value)
     return result
 
 
@@ -252,10 +269,11 @@ def _extract_vorbis(tags: Any) -> dict[str, Any]:
         raw = tags.get(vorbis_key) or tags.get(vorbis_key.lower())
         if not raw:
             continue
+        value = _first(raw)
         if key == "cover":
-            result[key] = _first(raw)
+            _add_if_present(result, key, value)
         else:
-            result[key] = str(_first(raw))
+            _add_if_present(result, key, str(value))
     return result
 
 
@@ -314,6 +332,47 @@ def get_tags(path: str) -> dict[str, Any] | None:
 
     result = {**_extract_info(audio), **tag_data}
     return result
+
+
+def get_cover(path: str) -> bytes | None:
+    """Return the embedded cover art for an audio file, if present."""
+    suffix = Path(path).suffix.lower()
+    if suffix not in SUPPORTED_EXTENSIONS:
+        return None
+
+    audio = MutagenFile(path, easy=False)
+    if audio is None:
+        return None
+
+    tags = audio.tags
+    if tags is None:
+        return None
+
+    if isinstance(tags, ID3Tags):
+        for frame in tags.getall("APIC"):
+            data = getattr(frame, "data", None)
+            if data:
+                return bytes(data)
+        return None
+
+    if isinstance(tags, MP4Tags):
+        cover = tags.get("covr")
+        if cover is None:
+            return None
+        value = _first(cover)
+        if value is None:
+            return None
+        return bytes(value)
+
+    raw = tags.get("cover") or tags.get("metadata_block_picture")
+    if raw is None:
+        return None
+    value = _first(raw)
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value
+    return bytes(str(value), "utf-8")
 
 
 def get_df_tags_from_path(path: str) -> _pd.DataFrame:
