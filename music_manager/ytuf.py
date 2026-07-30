@@ -3,11 +3,12 @@ wrapper from yt_dlp to download music from youtube and other sites
 '''
 
 import yt_dlp
+from .ytuf import normalize
 
 # def get_files(url: str, count: int) -> pd.DataFrame:
 #     files = [file for file in Path(path).rglob('*') if file.suffix.lower() in YUTUF.__yutuf_formats]
 #     files_with_dates = [(str(file), file.suffix.lower(), file.stat().st_ctime) for file in files]
-#     files_df = pd.DataFrame(files_with_dates, columns=['file', 'type', 'date'])
+#     files_df = pd.DataFrame(filess_with_dates, columns=['file', 'type', 'date'])
 #     files_df['date'] = pd.to_datetime(files_df['date'], unit='s').dt.strftime('%Y-%m-%d %H:%M')
 #     return files_df
 
@@ -73,3 +74,13 @@ def get_items(url: str) -> list[str]:
 
     item_url = info.get('webpage_url') or url
     return [item_url]
+
+
+def get_file_name(url: str):
+    with yt_dlp.YoutubeDL() as ydl:
+        info = ydl.extract_info(url, download=False)
+        # print(info)
+        # print(info.get('title', 'unknown'))
+        # print(ydl.prepare_filename(info))s
+        title = info.get('title', 'unknown')
+        return normalize(title)
