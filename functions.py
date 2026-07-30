@@ -350,6 +350,35 @@ class YUTUF:
                 return 1
 
     
+
+    @staticmethod
+    def get_items(url: str) -> list[str]:
+        '''
+        Returns a list of URLs from a playlist, album or any collection.
+        If the URL points to a single video, returns a list with that one URL.
+        '''
+        opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'skip_download': True,
+        }
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if info is None:
+                return []
+
+            if info.get('_type') == 'playlist':
+                urls = []
+                for entry in info.get('entries', []):
+                    if entry is None:
+                        continue
+                    entry_url = entry.get('url') or entry.get('webpage_url')
+                    if entry_url:
+                        urls.append(entry_url)
+                return urls
+
+            return [info.get('webpage_url') or url]
+
     @staticmethod
     def get_file_name(url: str):
         with yt_dlp.YoutubeDL() as ydl:
