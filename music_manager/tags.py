@@ -522,38 +522,3 @@ def consolided_file(path: str) -> None:
     oldfile.rename(filename)
     consolided_tag(filename)
 
-# import mutagen
-# from mutagen.id3 import COMM, ID3, ID3NoHeaderError
-
-# def get_comments(audio) -> list[str]:
-
-#     # MP3 (ID3)
-#     if isinstance(audio.tags, ID3):
-
-#         result = []
-
-#         for c in audio.tags.getall("COMM"):
-#             result.extend(c.text)
-
-#         return result
-
-
-#     # MP4/M4A
-#     if "\xa9cmt" in audio.tags:
-
-#         return list(audio["\xa9cmt"])
-
-
-#     # Vorbis (FLAC, OGG)
-#     if "comment" in audio.tags:
-
-#         value = audio["comment"]
-
-#         if isinstance(value, list):
-#             return value
-
-#         return [value]
-
-
-#     # otros formatos
-#     return []
