@@ -49,27 +49,27 @@ def download(path: str, url: str, audio: bool = False) -> bool:
 
 def get_items(url: str) -> list[str]:
     '''
-    Returns a list of URLs from a playlist, album or any collection.
-    If the URL points to a single video, returns a list with that one URL.
+    Returns a list of item URLs from a playlist, album or any collection.
+    If the URL points to a single video, returns a list with just that URL.
     '''
     opts = {
         'quiet': True,
-        'extract_flat': True,
+        'no_warnings': True,
+        'extract_flat': 'in_playlist',
         'skip_download': True,
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
-        if info is None:
-            return []
 
-        if info.get('_type') == 'playlist':
-            urls = []
-            for entry in info.get('entries', []):
-                if entry is None:
-                    continue
-                entry_url = entry.get('url') or entry.get('webpage_url')
-                if entry_url:
-                    urls.append(entry_url)
-            return urls
+    if info is None:
+        return []
 
-        return [info.get('webpage_url') or url]
+    if info.get('_type') == 'playlist':
+        return [
+            entry['url']
+            for entry in info.get('entries', [])
+            if entry is not None and entry.get('url')
+        ]
+
+    item_url = info.get('webpage_url') or url
+    return [item_url]
