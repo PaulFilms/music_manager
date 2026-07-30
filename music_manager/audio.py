@@ -2,21 +2,30 @@
 Modulo para la gestion de audio
 """
 
+import subprocess
+
+
 def from_webm_to_ogg(input_file: str, output_file: str) -> None:
     """
-    Convierte un archivo de audio de formato webm a ogg sin recodificar el audio.
-    """
-    import subprocess
+    Remuxea un archivo webm a ogg sin recodificar el audio.
 
+    Solo copia el stream de audio (Opus o Vorbis) al contenedor ogg,
+    por lo que es instantáneo y sin pérdida de calidad.
+    El archivo resultante es editable con mutagen (VorbisComment).
+    """
     command = [
         "ffmpeg",
+        "-y",                  # sobreescribir sin preguntar
         "-i", input_file,
+        "-vn",                 # descartar streams de video/imagen
         "-c:a", "copy",
-        output_file
+        "-loglevel", "error",  # silenciar output salvo errores
+        output_file,
     ]
 
-    subprocess.run(command, check=True)
+    result = subprocess.run(command, capture_output=True, text=True)
 
-p = "/home/pgp/Documents/Share/[MUSIC CONSOLIDED]/[#SAMPLER 20260102]/Darwin's Theory - I Hope You'll Be [US] Soul, Funk (1978).webm"
-
-from_webm_to_ogg(p, p.replace(".webm", ".ogg"))
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg falló al convertir '{input_file}':\n{result.stderr}"
+        )
