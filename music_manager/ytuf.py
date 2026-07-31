@@ -1,9 +1,15 @@
 '''
 wrapper from yt_dlp to download music from youtube and other sites
+
+Methods:
+--------
+    download(path: str, url: str, audio: bool = False) -> bool
+    get_items(url: str) -> list[str]
+    get_file_name(url: str) -> str
 '''
 
 import yt_dlp
-from .ytuf import normalize
+from .tags import normalize
 
 # def get_files(url: str, count: int) -> pd.DataFrame:
 #     files = [file for file in Path(path).rglob('*') if file.suffix.lower() in YUTUF.__yutuf_formats]
@@ -76,11 +82,13 @@ def get_items(url: str) -> list[str]:
     return [item_url]
 
 
-def get_file_name(url: str):
-    with yt_dlp.YoutubeDL() as ydl:
+def get_file_name(url: str) -> str:
+    opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'skip_download': True,
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
-        # print(info)
-        # print(info.get('title', 'unknown'))
-        # print(ydl.prepare_filename(info))s
-        title = info.get('title', 'unknown')
+        title = info.get('title', 'unknown') if info else 'unknown'
         return normalize(title)
