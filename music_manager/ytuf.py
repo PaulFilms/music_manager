@@ -9,6 +9,11 @@ Methods:
 '''
 
 import yt_dlp
+from datetime import datetime
+from pathlib import Path
+from mutagen import File as MutagenFile
+
+from .audio import from_webm_to_ogg
 from .tags import normalize
 
 # def get_files(url: str, count: int) -> pd.DataFrame:
@@ -31,27 +36,90 @@ def download(path: str, url: str, audio: bool = False) -> bool:
     Returns:
         bool: True if the download was successful, False otherwise.
     '''
+    output_dir = Path(path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     opts = {
         'format': 'bestvideo+bestaudio/best',  # Máxima calidad disponible
-        'outtmpl': path + '/%(title)s.%(ext)s',  # Ruta de guardado y nombre de archivo
+        'outtmpl': str(output_dir / '%(title)s.%(ext)s'),  # Ruta de guardado y nombre de archivo
         'merge_output_format': 'mp4',  # Fusionar video y audio en MP4
     }
     if audio:
         opts = {
-            'format': 'bestaudio',
+            'format': 'bestaudio[ext=webm]/bestaudio',
             'merge_output_format': 'webm',  # sin reencodeo
-            # 'postprocessors': [{
-            #     'key': 'FFmpegCopyAudio',  # copia sin reconvertir
-            # }],
-            'outtmpl': path + '/%(title)s.%(ext)s',
+            'writethumbnail': True,
+            'outtmpl': str(output_dir / '%(title)s.%(ext)s'),
         }
 
     with yt_dlp.YoutubeDL(opts) as ydl:
-        if ydl.download([url]):
-            # st.rerun()
-            return True
-    
-    return False
+        if not audio:
+            return ydl.download([url]) == 0
+
+        before_files = {file.resolve() for file in output_dir.iterdir() if file.is_file()}
+        info = ydl.extract_info(url, download=True)
+        if info is None:
+            return False
+
+        after_files = {file.resolve() for file in output_dir.iterdir() if file.is_file()}
+        new_files = sorted(after_files - before_files)
+
+        webm_file = next((file for file in new_files if file.suffix.lower() == ".webm"), None)
+        if webm_file is None:
+            expected_file = Path(ydl.prepare_filename(info))
+            if expected_file.exists() and expected_file.suffix.lower() == ".webm":
+                webm_file = expected_file.resolve()
+            else:
+                return False
+
+        cover_extensions = {".webp", ".jpg", ".jpeg", ".png", ".avif", ".bmp"}
+        cover_file = next(
+            (
+                file for file in new_files
+                if file.suffix.lower() in cover_extensions
+            ),
+            None,
+        )
+        if cover_file is None:
+            cover_file = next(
+                (
+                    file for file in output_dir.iterdir()
+                    if file.is_file()
+                    and file.stem == webm_file.stem
+                    and file.suffix.lower() in cover_extensions
+                ),
+                None,
+            )
+
+        ogg_file = from_webm_to_ogg(
+            input_file=str(webm_file),
+            cover=str(cover_file) if cover_file is not None else None,
+        )
+
+        audio_tags = MutagenFile(ogg_file, easy=False)
+        if audio_tags is None:
+            raise RuntimeError(f"No se pudieron abrir tags en '{ogg_file}'")
+
+        if audio_tags.tags is None:
+            audio_tags.add_tags()
+
+        title = info.get("title")
+        if title:
+            audio_tags["TITLE"] = [str(title)]
+
+        original_url = info.get("original_url") or info.get("webpage_url") or url
+        comments = [
+            f"#url: {original_url}",
+            f"#mngr: {datetime.now():%Y%m%d}",
+        ]
+        audio_tags["COMMENT"] = comments
+        audio_tags.save()
+
+        webm_file.unlink(missing_ok=True)
+        if cover_file is not None:
+            cover_file.unlink(missing_ok=True)
+
+        return True
 
 
 def get_items(url: str) -> list[str]:
