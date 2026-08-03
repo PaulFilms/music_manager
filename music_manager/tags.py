@@ -208,6 +208,16 @@ def _first(value: Any) -> Any:
     return value
 
 
+def _first_non_empty(value: Any) -> Any:
+    """Return the first non-empty element when mutagen returns a sequence."""
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            if not _is_empty(item):
+                return item
+        return None
+    return value
+
+
 def _is_empty(value: Any) -> bool:
     if value is None:
         return True
@@ -300,7 +310,7 @@ class Extractor:
         for atom, key in _MP4_MAP.items():
             if atom not in tags:
                 continue
-            value = _first(tags[atom])
+            value = _first_non_empty(tags[atom])
             if key == "cover":
                 value = bytes(value) if value is not None else None
             elif key in ("track", "disc") and isinstance(value, tuple):
@@ -382,8 +392,24 @@ class Extractor:
                 # VorbisComment (FLAC, OGG, Opus) and others share a dict-like interface
                 tag_data = Extractor._extract_vorbis(tags)
 
+        if not tag_data:
+            audio_easy = MutagenFile(path, easy=True)
+            easy_tags = getattr(audio_easy, "tags", None) if audio_easy is not None else None
+            if easy_tags is not None:
+                for key in ("title", "artist", "album", "albumartist", "genre", "date"):
+                    if key not in easy_tags:
+                        continue
+                    value = _first_non_empty(easy_tags.get(key))
+                    normalized_key = "year" if key == "date" else key
+                    _add_if_present(tag_data, normalized_key, str(value) if value is not None else None)
+
         result = {**Extractor._extract_info(audio), **tag_data}
         return result
+
+
+def get_tags(path: str) -> dict[str, Any] | None:
+    """Compatibility wrapper around Extractor.get_tags."""
+    return Extractor.get_tags(path)
 
 class Editor:
     """
@@ -577,4 +603,3 @@ def consolided_file(path: str) -> None:
     oldfile = Path(path)
     oldfile.rename(filename)
     consolided_tag(filename)
-
