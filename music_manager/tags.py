@@ -284,8 +284,7 @@ class Extractor:
             if key == "cover":
                 value = getattr(frame, "data", None)
             elif key == "comment":
-                # value = getattr(frame, "text", str(frame))
-                value = list(getattr(frame, "text", []) or [])
+                value = getattr(frame, "text", str(frame))
             elif hasattr(frame, "text"):
                 raw = frame.text
                 value = str(_first(raw)) if raw else None
