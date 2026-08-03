@@ -9,6 +9,7 @@ Librerias y herramientas usadas:
 - [TINYTAG](https://github.com/tinytag/tinytag.git)
 - [GAMDL](https://github.com/glomatico/gamdl.git)
 - [FFMPEG](https://ffmpeg.org/)
+- [TIDAL MEDIA DOWNLOAD](https://github.com/yaronzz/Tidal-Media-Downloader)
 
 Para instalar FFmpeg lo mas recomendable hasta el momento es:
 

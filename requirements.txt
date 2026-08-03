@@ -1,13 +1,16 @@
 ## TAGS / FILENAME
-tinytag
-RapidFuzz
+# tinytag
+# RapidFuzz
+mutagen
 
-streamlit
-ffmpeg-python
+# streamlit
+# ffmpeg-python
 librosa # for audio processing
-matplotlib
-streamlit-file-browser
+# matplotlib
+# streamlit-file-browser
 
 
+## 3rd Party Streaming Services
 yt_dlp
 gamdl
+# https://github.com/yaronzz/Tidal-Media-Downloader

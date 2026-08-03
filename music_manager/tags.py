@@ -135,6 +135,12 @@ def normalize(value: Any) -> str:
 
     return value[:MAX_LENGTH]
 
+SUPPORTED_EXTENSIONS: set[str] = {
+    ".mp3", ".mp4", ".m4a", ".m4b", ".m4p",
+    ".flac", ".ogg", ".oga", ".opus",
+    ".wav", ".aiff", ".aif", ".wv", ".ape",
+}
+
 ## ── Tag key mappings ──────────────────────────────────────────────────────────
 
 # ID3 (MP3, AIFF): frame_id → normalized key
@@ -194,12 +200,6 @@ _VORBIS_MAP: dict[str, str] = {
     "METADATA_BLOCK_PICTURE": "cover",
 }
 
-SUPPORTED_EXTENSIONS = {
-    ".mp3", ".mp4", ".m4a", ".m4b", ".m4p",
-    ".flac", ".ogg", ".oga", ".opus",
-    ".wav", ".aiff", ".aif", ".wv", ".ape",
-}
-
 
 def _first(value: Any) -> Any:
     """Unwrap single-element lists returned by mutagen."""
@@ -221,117 +221,6 @@ def _is_empty(value: Any) -> bool:
 def _add_if_present(result: dict[str, Any], key: str, value: Any) -> None:
     if not _is_empty(value):
         result[key] = value
-
-
-def _extract_id3(tags: ID3Tags) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for frame_id, key in _ID3_MAP.items():
-        frames = tags.getall(frame_id)
-        if not frames:
-            continue
-        frame = frames[0]
-        if key == "cover":
-            value = getattr(frame, "data", None)
-        elif key == "comment":
-            value = getattr(frame, "text", str(frame))
-        elif hasattr(frame, "text"):
-            raw = frame.text
-            value = str(_first(raw)) if raw else None
-        else:
-            value = str(frame)
-        _add_if_present(result, key, value)
-    return result
-
-
-def _extract_mp4(tags: MP4Tags) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for atom, key in _MP4_MAP.items():
-        if atom not in tags:
-            continue
-        value = _first(tags[atom])
-        if key == "cover":
-            value = bytes(value) if value is not None else None
-        elif key in ("track", "disc") and isinstance(value, tuple):
-            # MP4 stores (number, total) as a tuple
-            _add_if_present(result, key, str(value[0]) if value[0] else None)
-            total_key = "track_total" if key == "track" else "disc_total"
-            _add_if_present(result, total_key, str(value[1]) if len(value) > 1 and value[1] else None)
-            continue
-        else:
-            value = str(value) if value is not None else None
-        _add_if_present(result, key, value)
-    return result
-
-
-def _extract_vorbis(tags: Any) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for vorbis_key, key in _VORBIS_MAP.items():
-        raw = tags.get(vorbis_key) or tags.get(vorbis_key.lower())
-        if not raw:
-            continue
-        value = _first(raw)
-        if key == "cover":
-            _add_if_present(result, key, value)
-        else:
-            _add_if_present(result, key, str(value))
-    return result
-
-
-def _extract_info(audio: Any) -> dict[str, Any]:
-    """Extract audio stream properties from mutagen's info object."""
-    info = getattr(audio, "info", None)
-    if info is None:
-        return {}
-    props: dict[str, Any] = {}
-    for attr in ("length", "bitrate", "sample_rate", "channels", "bits_per_sample"):
-        val = getattr(info, attr, None)
-        if val is not None:
-            props[attr] = val
-    return props
-
-
-def get_tags(path: str) -> dict[str, Any] | None:
-    """
-    Extract tags from an audio file using mutagen.
-
-    Supports MP3, MP4/M4A, FLAC, OGG, Opus, WAV, AIFF and more.
-    Returns a normalized dict with consistent keys regardless of format,
-    plus audio stream info (length, bitrate, sample_rate, channels).
-    Returns None if the file format is unsupported.
-
-    Normalized tag keys
-    -------------------
-    title, artist, albumartist, album, track, track_total,
-    disc, disc_total, genre, year, composer, bpm, comment,
-    lyrics, cover (bytes), album_sort, artist_sort, title_sort
-
-    Audio info keys
-    ---------------
-    length (seconds), bitrate (bps), sample_rate (Hz),
-    channels, bits_per_sample
-    """
-    suffix = Path(path).suffix.lower()
-    if suffix not in SUPPORTED_EXTENSIONS:
-        return None
-
-    audio = MutagenFile(path, easy=False)
-    if audio is None:
-        return None
-
-    tags = audio.tags
-    tag_data: dict[str, Any] = {}
-
-    if tags is not None:
-        if isinstance(tags, ID3Tags):
-            tag_data = _extract_id3(tags)
-        elif isinstance(tags, MP4Tags):
-            tag_data = _extract_mp4(tags)
-        else:
-            # VorbisComment (FLAC, OGG, Opus) and others share a dict-like interface
-            tag_data = _extract_vorbis(tags)
-
-    result = {**_extract_info(audio), **tag_data}
-    return result
 
 
 def get_cover(path: str) -> bytes | None:
@@ -373,6 +262,173 @@ def get_cover(path: str) -> bytes | None:
     if isinstance(value, bytes):
         return value
     return bytes(str(value), "utf-8")
+
+
+
+class Extractor:
+    """
+    Class for extracting tags from audio files using mutagen. 
+
+    Attributes:
+        get_tags: method - Extracts tags from an audio file and returns a normalized dictionary.
+    """ 
+
+    @staticmethod
+    def _extract_id3(tags: ID3Tags) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for frame_id, key in _ID3_MAP.items():
+            frames = tags.getall(frame_id)
+            if not frames:
+                continue
+            frame = frames[0]
+            if key == "cover":
+                value = getattr(frame, "data", None)
+            elif key == "comment":
+                # value = getattr(frame, "text", str(frame))
+                value = list(getattr(frame, "text", []) or [])
+            elif hasattr(frame, "text"):
+                raw = frame.text
+                value = str(_first(raw)) if raw else None
+            else:
+                value = str(frame)
+            _add_if_present(result, key, value)
+        return result
+
+    @staticmethod
+    def _extract_mp4(tags: MP4Tags) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for atom, key in _MP4_MAP.items():
+            if atom not in tags:
+                continue
+            value = _first(tags[atom])
+            if key == "cover":
+                value = bytes(value) if value is not None else None
+            elif key in ("track", "disc") and isinstance(value, tuple):
+                # MP4 stores (number, total) as a tuple
+                _add_if_present(result, key, str(value[0]) if value[0] else None)
+                total_key = "track_total" if key == "track" else "disc_total"
+                _add_if_present(result, total_key, str(value[1]) if len(value) > 1 and value[1] else None)
+                continue
+            else:
+                value = str(value) if value is not None else None
+            _add_if_present(result, key, value)
+        return result
+
+    @staticmethod
+    def _extract_vorbis(tags: Any) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for vorbis_key, key in _VORBIS_MAP.items():
+            raw = tags.get(vorbis_key) or tags.get(vorbis_key.lower())
+            if not raw:
+                continue
+            value = _first(raw)
+            if key == "cover":
+                _add_if_present(result, key, value)
+            else:
+                _add_if_present(result, key, str(value))
+        return result
+
+    @staticmethod
+    def _extract_info(audio: Any) -> dict[str, Any]:
+        """Extract audio stream properties from mutagen's info object."""
+        info = getattr(audio, "info", None)
+        if info is None:
+            return {}
+        props: dict[str, Any] = {}
+        for attr in ("length", "bitrate", "sample_rate", "channels", "bits_per_sample"):
+            val = getattr(info, attr, None)
+            if val is not None:
+                props[attr] = val
+        return props
+
+    @staticmethod
+    def get_tags(path: str) -> dict[str, Any] | None:
+        """
+        Extract tags from an audio file using mutagen.
+
+        Supports MP3, MP4/M4A, FLAC, OGG, Opus, WAV, AIFF and more.
+        Returns a normalized dict with consistent keys regardless of format,
+        plus audio stream info (length, bitrate, sample_rate, channels).
+        Returns None if the file format is unsupported.
+
+        Normalized tag keys
+        -------------------
+        title, artist, albumartist, album, track, track_total,
+        disc, disc_total, genre, year, composer, bpm, comment,
+        lyrics, cover (bytes), album_sort, artist_sort, title_sort
+
+        Audio info keys
+        ---------------
+        length (seconds), bitrate (bps), sample_rate (Hz),
+        channels, bits_per_sample
+        """
+        suffix = Path(path).suffix.lower()
+        if suffix not in SUPPORTED_EXTENSIONS:
+            return None
+
+        audio = MutagenFile(path, easy=False)
+        if audio is None:
+            return None
+
+        tags = audio.tags
+        tag_data: dict[str, Any] = {}
+
+        if tags is not None:
+            if isinstance(tags, ID3Tags):
+                tag_data = Extractor._extract_id3(tags)
+            elif isinstance(tags, MP4Tags):
+                tag_data = Extractor._extract_mp4(tags)
+            else:
+                # VorbisComment (FLAC, OGG, Opus) and others share a dict-like interface
+                tag_data = Extractor._extract_vorbis(tags)
+
+        result = {**Extractor._extract_info(audio), **tag_data}
+        return result
+
+class Editor:
+    """
+    Class for editing tags of audio files using mutagen.
+
+    Attributes:
+        set_tags: method - Sets tags for an audio file from a dictionary.
+    """ 
+
+    @staticmethod
+    def set_comments(path: str, comments: list[str]) -> None:
+        """
+        Set the comment tags of an audio file to a list of strings.
+        Overwrites any existing comments.
+        """
+        audio = MutagenFile(path, easy=False)
+        if audio is None:
+            raise ValueError(f"Unsupported file format: {path}")
+
+        tags = audio.tags
+        if tags is None:
+            raise ValueError(f"No tags found in file: {path}")
+
+        # Remove existing comment frames
+        if isinstance(tags, ID3Tags):
+            for frame in tags.getall("COMM"):
+                tags.delall(frame.FrameID)
+            for comment in comments:
+                tags.add(
+                    ID3Tags.Comm(
+                        encoding=3,  # UTF-8
+                        lang="eng",
+                        desc="",
+                        text=comment
+                    )
+                )
+        elif isinstance(tags, MP4Tags):
+            tags["©cmt"] = comments
+        else:
+            # VorbisComment (FLAC, OGG, Opus) and others
+            tags["COMMENT"] = comments
+
+        audio.save()
+
+
 
 
 def get_df_tags_from_path(path: str) -> _pd.DataFrame:
