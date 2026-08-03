@@ -181,6 +181,7 @@ cookies.txt
 cookies/
 Apple Music/
 yutuf/
+.temp/
 temp/
 test.py
 *.ipynb

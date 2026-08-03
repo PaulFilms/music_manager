@@ -46,9 +46,9 @@ y devuelve algo como:
 
 ## OPTIONAL IMPORTS
 from __future__ import annotations
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    import pandas as _pd
+# from typing import TYPE_CHECKING
+# if TYPE_CHECKING:
+#     import pandas as _pd
 
 import re
 import unicodedata
@@ -58,7 +58,7 @@ from dataclasses import dataclass, field
 from collections.abc import Iterable
 from typing import Any
 from mutagen import File as MutagenFile
-from mutagen.id3 import ID3Tags
+from mutagen.id3 import ID3Tags, COMM
 from mutagen.mp4 import MP4Tags
 from rapidfuzz import fuzz
 
@@ -201,6 +201,8 @@ _VORBIS_MAP: dict[str, str] = {
 }
 
 
+
+
 def _first(value: Any) -> Any:
     """Unwrap single-element lists returned by mutagen."""
     if isinstance(value, (list, tuple)) and value:
@@ -233,54 +235,14 @@ def _add_if_present(result: dict[str, Any], key: str, value: Any) -> None:
         result[key] = value
 
 
-def get_cover(path: str) -> bytes | None:
-    """Return the embedded cover art for an audio file, if present."""
-    suffix = Path(path).suffix.lower()
-    if suffix not in SUPPORTED_EXTENSIONS:
-        return None
-
-    audio = MutagenFile(path, easy=False)
-    if audio is None:
-        return None
-
-    tags = audio.tags
-    if tags is None:
-        return None
-
-    if isinstance(tags, ID3Tags):
-        for frame in tags.getall("APIC"):
-            data = getattr(frame, "data", None)
-            if data:
-                return bytes(data)
-        return None
-
-    if isinstance(tags, MP4Tags):
-        cover = tags.get("covr")
-        if cover is None:
-            return None
-        value = _first(cover)
-        if value is None:
-            return None
-        return bytes(value)
-
-    raw = tags.get("cover") or tags.get("metadata_block_picture")
-    if raw is None:
-        return None
-    value = _first(raw)
-    if value is None:
-        return None
-    if isinstance(value, bytes):
-        return value
-    return bytes(str(value), "utf-8")
-
-
-
 class Extractor:
     """
     Class for extracting tags from audio files using mutagen. 
 
     Attributes:
         get_tags: method - Extracts tags from an audio file and returns a normalized dictionary.
+        get_cover: method - Returns the embedded cover art for an audio file, if present.
+        get_filename_from_tags: method - Returns a normalized string for filename from a tag dictionary.
     """ 
 
     @staticmethod
@@ -405,10 +367,86 @@ class Extractor:
         result = {**Extractor._extract_info(audio), **tag_data}
         return result
 
+    @staticmethod
+    def get_cover(path: str) -> bytes | None:
+        """Return the embedded cover art for an audio file, if present."""
+        suffix = Path(path).suffix.lower()
+        if suffix not in SUPPORTED_EXTENSIONS:
+            return None
 
-def get_tags(path: str) -> dict[str, Any] | None:
-    """Compatibility wrapper around Extractor.get_tags."""
-    return Extractor.get_tags(path)
+        audio = MutagenFile(path, easy=False)
+        if audio is None:
+            return None
+
+        tags = audio.tags
+        if tags is None:
+            return None
+
+        if isinstance(tags, ID3Tags):
+            for frame in tags.getall("APIC"):
+                data = getattr(frame, "data", None)
+                if data:
+                    return bytes(data)
+            return None
+
+        if isinstance(tags, MP4Tags):
+            cover = tags.get("covr")
+            if cover is None:
+                return None
+            value = _first(cover)
+            if value is None:
+                return None
+            return bytes(value)
+
+        raw = tags.get("cover") or tags.get("metadata_block_picture")
+        if raw is None:
+            return None
+        value = _first(raw)
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            return value
+        return bytes(str(value), "utf-8")
+
+    @staticmethod
+    def get_filename_from_tags(tags: dict[str, Any], mode: int = 0) -> str:
+        """
+        Returns a normalized str for filename from a tag dictionary
+        
+        Parameters
+        ---------- 
+        tags : dict[str, Any] 
+        mode : int
+
+        Returns
+        --------
+        mode:
+            - 0. Single `artist - title` 
+            - 1. Album `album - track - title`
+        """
+        artist = normalize(tags.get("artist"))
+        title = normalize(tags.get("title"))
+        album = normalize(tags.get("album"))
+
+        track = (
+            tags.get("track")
+            or tags.get("track_number")
+            or tags.get("trkn")
+            or 0
+        )
+
+        try:
+            track = int(track)
+        except (TypeError, ValueError):
+            track = 0
+
+        if mode == 0:
+            return f"{artist} - {title}"
+        elif mode == 1:
+            return f"{album} - {track:02d} - {title}"
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
+
 
 class Editor:
     """
@@ -424,6 +462,7 @@ class Editor:
         Set the comment tags of an audio file to a list of strings.
         Overwrites any existing comments.
         """
+        
         audio = MutagenFile(path, easy=False)
         if audio is None:
             raise ValueError(f"Unsupported file format: {path}")
@@ -432,76 +471,50 @@ class Editor:
         if tags is None:
             raise ValueError(f"No tags found in file: {path}")
 
-        # Remove existing comment frames
+        # Normalize comments
+        comments = [
+            c.strip() 
+            for c in comments 
+            if c and c.strip()
+        ]
+
         if isinstance(tags, ID3Tags):
-            for frame in tags.getall("COMM"):
-                tags.delall(frame.FrameID)
-            for comment in comments:
+            # Remove existing COMM frames
+            tags.delall("COMM")
+
+            if comments:
+                # Single COMM frame containing multiple texts
                 tags.add(
-                    ID3Tags.Comm(
+                    COMM(
                         encoding=3,  # UTF-8
-                        lang="eng",
+                        lang="und",
                         desc="",
-                        text=comment
+                        text=comments
                     )
                 )
+        
         elif isinstance(tags, MP4Tags):
-            tags["©cmt"] = comments
+            if comments:
+                tags["©cmt"] = comments
+            else:
+                tags.pop("©cmt", None)
+
+        # VorbisComment (FLAC, OGG, Opus) and others
         else:
-            # VorbisComment (FLAC, OGG, Opus) and others
             tags["COMMENT"] = comments
+            if comments:
+                tags["COMMENT"] = comments
+            else:
+                tags.pop("COMMENT", None)
 
         audio.save()
 
 
 
 
-def get_df_tags_from_path(path: str) -> _pd.DataFrame:
-    from ._optional import pandas; pd = pandas()
 
-    path_songs = [
-        file for file in Path(path).rglob("*")
-        if file.is_file() and file.suffix.lower() in SUPPORTED_EXTENSIONS
-    ]
-    tag_songs = [get_tags(str(file)) for file in path_songs]
-    tag_songs = [t for t in tag_songs if t is not None]
-    return pd.DataFrame(tag_songs)
 
-def get_filename_from_tags(tags: dict[str, Any], mode: int = 0) -> str:
-    """
-    Returns a normalized str for filename from a tag dictionary
     
-    Parameters
-    ---------- 
-    tags : dict[str, Any] 
-    mode : int
-
-    Returns
-    --------
-    mode:
-        - 0. Single -> artist - title 
-        - 1. Album -> album - track - title 
-    """
-    artist = normalize(tags.get("artist"))
-    title = normalize(tags.get("title"))
-    album = normalize(tags.get("album"))
-
-    track = (
-        tags.get("track")
-        or tags.get("track_number")
-        or tags.get("trkn")
-        or 0
-    )
-
-    try:
-        track = int(track)
-    except (TypeError, ValueError):
-        track = 0
-
-    if mode == 0:
-        return f"{artist} - {title}"
-
-    return f"{album} - {track:02d} - {title}"
 
 @dataclass
 class TrackCheck:
@@ -562,43 +575,21 @@ class TrackCheck:
                 return True
         return False
 
+TAG_PATTERN = re.compile(r"^#(?P<key>[a-zA-Z0-9_-]+):\s*(?P<value>.*)$")
 
-CONSOLIDATED_PREFIX = "#mngr-"
 
 def consolidated_signature() -> str:
-    return f"{CONSOLIDATED_PREFIX}{datetime.now():%Y%m%d}"
+    CONSOLIDATED_PREFIX = "mngr"
+    return f"#{CONSOLIDATED_PREFIX}: {datetime.now():%Y%m%d}"
 
-def update_comment(comment: str | list[str] | None) -> list[str]:
-    """
-    Mantiene comentarios existentes y añade/reemplaza la firma mngr.
-    """
 
-    signature = consolidated_signature()
+# def get_df_tags_from_path(path: str) -> _pd.DataFrame:
+#     from ._optional import pandas; pd = pandas()
 
-    if comment is None:
-        comments = []
-
-    elif isinstance(comment, str):
-        comments = [comment]
-
-    else:
-        comments = list(comment)
-
-    # eliminar firmas antiguas
-    comments = [
-        c
-        for c in comments
-        if not c.startswith(CONSOLIDATED_PREFIX)
-    ]
-
-    comments.append(signature)
-
-    return comments
-
-def consolided_file(path: str) -> None:
-    tags: dict[str, Any] = get_tags(path) # validado / tinytag
-    filename = get_filename_from_tags(tags, mode=0) # modes: 0. Single / 1. Album
-    # Despues implementare añadir un count para duplicados
-    oldfile = Path(path)
-    oldfile.rename(filename)
-    consolided_tag(filename)
+#     path_songs = [
+#         file for file in Path(path).rglob("*")
+#         if file.is_file() and file.suffix.lower() in SUPPORTED_EXTENSIONS
+#     ]
+#     tag_songs = [get_tags(str(file)) for file in path_songs]
+#     tag_songs = [t for t in tag_songs if t is not None]
+#     return pd.DataFrame(tag_songs)
