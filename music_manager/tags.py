@@ -506,6 +506,7 @@ class Editor:
     Class for editing tags of audio files using mutagen.
 
     Attributes:
+        set_comments: method - Sets the comment tags of an audio file to a list of strings.
         set_tags: method - Sets tags for an audio file from a dictionary.
     """ 
 
@@ -561,10 +562,6 @@ class Editor:
                 tags.pop("COMMENT", None)
 
         audio.save()
-
-
-
-
 
     @staticmethod
     def _set_id3_tags(tags: ID3Tags, tags_dict: dict[str, Any]) -> None:
