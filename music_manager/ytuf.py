@@ -15,6 +15,25 @@ from mutagen import File as MutagenFile
 from .audio import from_webm_to_ogg
 
 
+def _is_non_individual_youtube_result(info: dict, url: str) -> bool:
+    """
+    Return True when a YouTube URL resolves to a collection-like resource
+    (playlist, album, channel feed, etc.) instead of a single video.
+    """
+    extractor = str(info.get("extractor_key") or info.get("extractor") or "")
+    source_url = str(info.get("webpage_url") or info.get("original_url") or url)
+    is_youtube = "youtube" in extractor.lower() or "youtu" in source_url.lower()
+
+    if not is_youtube:
+        return False
+
+    info_type = info.get("_type")
+    if info_type in {"playlist", "multi_video"}:
+        return True
+
+    return bool(info.get("entries"))
+
+
 def download(path: str, url: str, audio: bool = False, replace: bool = True):
     '''
     Download a video or audio from a given URL using yt_dlp.
@@ -27,8 +46,9 @@ def download(path: str, url: str, audio: bool = False, replace: bool = True):
             If False, conserva el *.webm original y la cover descargada, si existe.
 
     Returns:
-        bool | str: True if a video download was successful, False otherwise.
+        bool | str | None: True if a video download was successful, False otherwise.
             For audio downloads, returns the resulting file path.
+            Returns None when a YouTube URL is not an individual video.
     '''
     output_dir = Path(path)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -53,15 +73,22 @@ def download(path: str, url: str, audio: bool = False, replace: bool = True):
         opts.update({
             'format': 'bestaudio[ext=webm]/bestaudio',
             'merge_output_format': 'webm',
+            'writethumbnail': True,
         })
 
     with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        if info is None:
+            return False
+
+        if _is_non_individual_youtube_result(info, url):
+            return None
+
         if not audio:
             return ydl.download([url]) == 0
 
         before_files = {file.resolve() for file in output_dir.iterdir() if file.is_file()}
-        info = ydl.extract_info(url, download=True)
-        if info is None:
+        if ydl.download([url]) != 0:
             return False
 
         after_files = {file.resolve() for file in output_dir.iterdir() if file.is_file()}

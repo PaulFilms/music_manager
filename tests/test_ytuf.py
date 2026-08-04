@@ -66,13 +66,18 @@ class DownloadAudioTests(unittest.TestCase):
                 def __exit__(self, exc_type, exc, tb):
                     return False
 
-                def extract_info(self, url, download=True):
-                    webm_path.write_bytes(b"webm")
-                    cover_path.write_bytes(b"cover")
+                def extract_info(self, url, download=False):
                     return {
                         "title": "Track",
                         "webpage_url": url,
                     }
+
+                def download(self, urls):
+                    self.opts["writethumbnail"]
+                    webm_path.write_bytes(b"webm")
+                    if self.opts.get("writethumbnail"):
+                        cover_path.write_bytes(b"cover")
+                    return 0
 
                 def prepare_filename(self, info):
                     return str(webm_path)
@@ -116,13 +121,18 @@ class DownloadAudioTests(unittest.TestCase):
                 def __exit__(self, exc_type, exc, tb):
                     return False
 
-                def extract_info(self, url, download=True):
-                    webm_path.write_bytes(b"webm")
-                    cover_path.write_bytes(b"cover")
+                def extract_info(self, url, download=False):
                     return {
                         "title": "Track",
                         "webpage_url": url,
                     }
+
+                def download(self, urls):
+                    self.opts["writethumbnail"]
+                    webm_path.write_bytes(b"webm")
+                    if self.opts.get("writethumbnail"):
+                        cover_path.write_bytes(b"cover")
+                    return 0
 
                 def prepare_filename(self, info):
                     return str(webm_path)
@@ -144,6 +154,44 @@ class DownloadAudioTests(unittest.TestCase):
             self.assertFalse(webm_path.exists())
             self.assertFalse(cover_path.exists())
             self.assertTrue(ogg_path.exists())
+
+    def test_youtube_playlist_url_returns_none_without_downloading(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+
+            class FakeYoutubeDL:
+                def __init__(self, opts):
+                    self.opts = opts
+                    self.download_called = False
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+                def extract_info(self, url, download=False):
+                    return {
+                        "_type": "playlist",
+                        "extractor_key": "YoutubeTab",
+                        "webpage_url": url,
+                        "entries": [{"url": "https://www.youtube.com/watch?v=abc"}],
+                    }
+
+                def download(self, urls):
+                    self.download_called = True
+                    raise AssertionError("download() should not be called for YouTube playlists")
+
+            with patch("music_manager.ytuf.yt_dlp.YoutubeDL", FakeYoutubeDL):
+                result = ytuf.download(
+                    tmpdir,
+                    "https://www.youtube.com/playlist?list=PL123",
+                    audio=True,
+                    replace=False,
+                )
+
+            self.assertIsNone(result)
+            self.assertEqual([], list(output_dir.iterdir()))
 
 
 if __name__ == "__main__":
