@@ -369,7 +369,9 @@ class Extractor:
 
     @staticmethod
     def get_cover(path: str) -> bytes | None:
-        """Return the embedded cover art for an audio file, if present."""
+        """
+        Return the embedded cover art for an audio file, if present.
+        """
         suffix = Path(path).suffix.lower()
         if suffix not in SUPPORTED_EXTENSIONS:
             return None
@@ -551,7 +553,7 @@ class TrackCheck:
     @classmethod
     def from_file(cls, path_file: str):
         return cls.from_tags(
-            get_tags(path_file)
+            Extractor.get_tags(path_file)
         )
 
     @classmethod
@@ -575,8 +577,9 @@ class TrackCheck:
                 return True
         return False
 
-TAG_PATTERN = re.compile(r"^#(?P<key>[a-zA-Z0-9_-]+):\s*(?P<value>.*)$")
 
+
+TAG_PATTERN = re.compile(r"^#(?P<key>[a-zA-Z0-9_-]+):\s*(?P<value>.*)$")
 
 def consolidated_signature() -> str:
     CONSOLIDATED_PREFIX = "mngr"

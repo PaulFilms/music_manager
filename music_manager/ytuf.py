@@ -5,7 +5,6 @@ Methods:
 --------
     download(path: str, url: str, audio: bool = False) -> bool
     get_items(url: str) -> list[str]
-    get_file_name(url: str) -> str
 '''
 
 import yt_dlp
@@ -14,17 +13,9 @@ from pathlib import Path
 from mutagen import File as MutagenFile
 
 from .audio import from_webm_to_ogg
-from .tags import normalize
-
-# def get_files(url: str, count: int) -> pd.DataFrame:
-#     files = [file for file in Path(path).rglob('*') if file.suffix.lower() in YUTUF.__yutuf_formats]
-#     files_with_dates = [(str(file), file.suffix.lower(), file.stat().st_ctime) for file in files]
-#     files_df = pd.DataFrame(filess_with_dates, columns=['file', 'type', 'date'])
-#     files_df['date'] = pd.to_datetime(files_df['date'], unit='s').dt.strftime('%Y-%m-%d %H:%M')
-#     return files_df
 
 
-def download(path: str, url: str, audio: bool = False) -> bool:
+def download(path: str, url: str, audio: bool = False):
     '''
     Download a video or audio from a given URL using yt_dlp.
 
@@ -40,17 +31,26 @@ def download(path: str, url: str, audio: bool = False) -> bool:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     opts = {
-        'format': 'bestvideo+bestaudio/best',  # Máxima calidad disponible
-        'outtmpl': str(output_dir / '%(title)s.%(ext)s'),  # Ruta de guardado y nombre de archivo
-        'merge_output_format': 'mp4',  # Fusionar video y audio en MP4
+        "quiet": True,
+        'no_warnings': True,
+        'format': 'bestvideo+bestaudio/best',
+        'outtmpl': str(output_dir / '%(title)s.%(ext)s'),
+        "restrictfilenames": True,
+        'merge_output_format': 'mp4',
     }
     if audio:
-        opts = {
+        # opts = {
+        #     'no_warnings': True,
+        #     'format': 'bestaudio[ext=webm]/bestaudio',
+        #     'merge_output_format': 'webm',
+        #     'writethumbnail': True,
+        #     'outtmpl': str(output_dir / '%(title)s.%(ext)s'),
+        #     "restrictfilenames": True,
+        # }
+        opts.update({
             'format': 'bestaudio[ext=webm]/bestaudio',
-            'merge_output_format': 'webm',  # sin reencodeo
-            'writethumbnail': True,
-            'outtmpl': str(output_dir / '%(title)s.%(ext)s'),
-        }
+            'merge_output_format': 'webm',
+        })
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         if not audio:
@@ -119,7 +119,7 @@ def download(path: str, url: str, audio: bool = False) -> bool:
         if cover_file is not None:
             cover_file.unlink(missing_ok=True)
 
-        return True
+        return ogg_file
 
 
 def get_items(url: str) -> list[str]:
@@ -148,15 +148,3 @@ def get_items(url: str) -> list[str]:
 
     item_url = info.get('webpage_url') or url
     return [item_url]
-
-
-def get_file_name(url: str) -> str:
-    opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'skip_download': True,
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        title = info.get('title', 'unknown') if info else 'unknown'
-        return normalize(title)

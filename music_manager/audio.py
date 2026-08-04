@@ -1,5 +1,5 @@
 """
-Modulo para la gestion de audio
+Module for audio management
 """
 
 import base64
@@ -7,12 +7,17 @@ import mimetypes
 import subprocess
 from pathlib import Path
 
+from mutagen import File as MutagenFile
 from mutagen.flac import Picture
-from mutagen.oggvorbis import OggVorbis
 
 
 def _embed_cover_in_ogg(ogg_file: str, cover_file: str) -> None:
-    audio = OggVorbis(ogg_file)
+    audio = MutagenFile(ogg_file, easy=False)
+    if audio is None:
+        raise RuntimeError(f"No se pudo abrir el archivo OGG '{ogg_file}' para incrustar cover")
+
+    if audio.tags is None:
+        audio.add_tags()
 
     picture = Picture()
     picture.type = 3  # front cover
@@ -23,7 +28,7 @@ def _embed_cover_in_ogg(ogg_file: str, cover_file: str) -> None:
     picture.data = Path(cover_file).read_bytes()
 
     encoded_picture = base64.b64encode(picture.write()).decode("ascii")
-    audio["METADATA_BLOCK_PICTURE"] = [encoded_picture]
+    audio.tags["METADATA_BLOCK_PICTURE"] = [encoded_picture]
     audio.save()
 
 
@@ -40,11 +45,11 @@ def from_webm_to_ogg(input_file: str, cover: str = None) -> str:
     output_file = str(p.with_suffix(".ogg"))
     command = [
         "ffmpeg",
-        "-y",                  # sobreescribir sin preguntar
+        "-y",
         "-i", input_file,
-        "-vn",                 # descartar streams de video/imagen
+        "-vn",
         "-c:a", "copy",
-        "-loglevel", "error",  # silenciar output salvo errores
+        "-loglevel", "error",
         output_file,
     ]
 

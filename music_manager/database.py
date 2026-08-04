@@ -10,7 +10,9 @@ from datetime import datetime
 from dataclasses import dataclass, fields
 from pathlib import Path
 from mysqlite import *
-from tinytag import TinyTag
+# from tinytag import TinyTag
+
+from music_manager.tags import SUPPORTED_EXTENSIONS
 
 SKIP_DIRS = {
     ".Spotlight-V100",
@@ -193,7 +195,9 @@ def scan(root: str | Path) -> tuple[list[Folder], list[File]]:
 
                 elif entry.is_file(follow_symlinks=False):
                     ext = Path(entry.name).suffix.lower()
-                    if ext not in TinyTag.SUPPORTED_FILE_EXTENSIONS:
+                    # if ext not in TinyTag.SUPPORTED_FILE_EXTENSIONS:
+                    #     continue
+                    if ext not in SUPPORTED_EXTENSIONS:
                         continue
 
                     nfiles += 1
