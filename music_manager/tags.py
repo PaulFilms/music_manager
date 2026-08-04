@@ -58,8 +58,11 @@ from dataclasses import dataclass, field
 from collections.abc import Iterable
 from typing import Any
 from mutagen import File as MutagenFile
-from mutagen.id3 import ID3Tags, COMM
-from mutagen.mp4 import MP4Tags
+from mutagen.id3 import (
+    ID3Tags, COMM,
+    TIT2, TIT3, TPE1, TPE2, TALB, TRCK, TPOS, TCON, TDRC, TCOM, TBPM, USLT, APIC,
+)
+from mutagen.mp4 import MP4Tags, MP4Cover
 from rapidfuzz import fuzz
 
 
@@ -141,7 +144,7 @@ SUPPORTED_EXTENSIONS: set[str] = {
     ".wav", ".aiff", ".aif", ".wv", ".ape",
 }
 
-## ── Tag key mappings ──────────────────────────────────────────────────────────
+## ── Tag key mappings (read: native → normalized) ─────────────────────────────
 
 # ID3 (MP3, AIFF): frame_id → normalized key
 _ID3_MAP: dict[str, str] = {
@@ -201,6 +204,54 @@ _VORBIS_MAP: dict[str, str] = {
 }
 
 
+## ── Tag key mappings (write: normalized → native) ────────────────────────────
+
+# normalized key → ID3 frame id  (text-only frames; COMM/USLT/APIC handled separately)
+_ID3_WRITE_MAP: dict[str, str] = {
+    "title":       "TIT2",
+    "subtitle":    "TIT3",
+    "artist":      "TPE1",
+    "albumartist": "TPE2",
+    "album":       "TALB",
+    "track":       "TRCK",
+    "disc":        "TPOS",
+    "genre":       "TCON",
+    "year":        "TDRC",
+    "composer":    "TCOM",
+    "bpm":         "TBPM",
+}
+
+# normalized key → MP4 atom  (text atoms; trkn/disk/tmpo/covr handled separately)
+_MP4_WRITE_MAP: dict[str, str] = {
+    "title":       "©nam",
+    "artist":      "©ART",
+    "albumartist": "aART",
+    "album":       "©alb",
+    "genre":       "©gen",
+    "year":        "©day",
+    "composer":    "©wrt",
+    "comment":     "©cmt",
+    "lyrics":      "©lyr",
+    "album_sort":  "soal",
+    "artist_sort": "soar",
+    "title_sort":  "sonm",
+}
+
+# normalized key → Vorbis tag key (cover/METADATA_BLOCK_PICTURE handled separately)
+_VORBIS_WRITE_MAP: dict[str, str] = {
+    "title":       "TITLE",
+    "artist":      "ARTIST",
+    "albumartist": "ALBUMARTIST",
+    "album":       "ALBUM",
+    "track":       "TRACKNUMBER",
+    "disc":        "DISCNUMBER",
+    "genre":       "GENRE",
+    "year":        "DATE",
+    "composer":    "COMPOSER",
+    "bpm":         "BPM",
+    "comment":     "COMMENT",
+    "lyrics":      "LYRICS",
+}
 
 
 def _first(value: Any) -> Any:
@@ -515,10 +566,173 @@ class Editor:
 
 
 
+    @staticmethod
+    def _set_id3_tags(tags: ID3Tags, tags_dict: dict[str, Any]) -> None:
+        _ID3_TEXT_FRAMES = {
+            "title":       TIT2,
+            "subtitle":    TIT3,
+            "artist":      TPE1,
+            "albumartist": TPE2,
+            "album":       TALB,
+            "track":       TRCK,
+            "disc":        TPOS,
+            "genre":       TCON,
+            "year":        TDRC,
+            "composer":    TCOM,
+            "bpm":         TBPM,
+        }
+        for key, FrameClass in _ID3_TEXT_FRAMES.items():
+            if key not in tags_dict:
+                continue
+            value = tags_dict[key]
+            frame_id = _ID3_WRITE_MAP[key]
+            if value is None or value == "":
+                tags.delall(frame_id)
+            else:
+                tags[frame_id] = FrameClass(encoding=3, text=[str(value)])
 
-    
+        if "comment" in tags_dict:
+            value = tags_dict["comment"]
+            tags.delall("COMM")
+            if value is not None and value != "":
+                text = list(value) if isinstance(value, (list, tuple)) else [str(value)]
+                tags.add(COMM(encoding=3, lang="und", desc="", text=text))
 
-@dataclass
+        if "lyrics" in tags_dict:
+            value = tags_dict["lyrics"]
+            tags.delall("USLT")
+            if value is not None and value != "":
+                tags.add(USLT(encoding=3, lang="und", desc="", text=str(value)))
+
+        if "cover" in tags_dict:
+            value = tags_dict["cover"]
+            tags.delall("APIC")
+            if isinstance(value, bytes) and value:
+                mime = "image/png" if value[:4] == b"\x89PNG" else "image/jpeg"
+                tags.add(APIC(encoding=3, mime=mime, type=3, desc="", data=value))
+
+    @staticmethod
+    def _set_mp4_tags(tags: MP4Tags, tags_dict: dict[str, Any]) -> None:
+        for key, atom in _MP4_WRITE_MAP.items():
+            if key not in tags_dict:
+                continue
+            value = tags_dict[key]
+            if value is None or value == "":
+                tags.pop(atom, None)
+            else:
+                tags[atom] = [str(value)]
+
+        if "bpm" in tags_dict:
+            value = tags_dict["bpm"]
+            if value is None or value == "":
+                tags.pop("tmpo", None)
+            else:
+                try:
+                    tags["tmpo"] = [int(value)]
+                except (ValueError, TypeError):
+                    tags.pop("tmpo", None)
+
+        for num_key, total_key, atom in (("track", "track_total", "trkn"), ("disc", "disc_total", "disk")):
+            if num_key not in tags_dict and total_key not in tags_dict:
+                continue
+            current = tags.get(atom)
+            current_tuple = _first(current) if current else None
+            curr_num   = current_tuple[0] if isinstance(current_tuple, tuple) else 0
+            curr_total = current_tuple[1] if isinstance(current_tuple, tuple) and len(current_tuple) > 1 else 0
+
+            new_num   = curr_num
+            new_total = curr_total
+            if num_key in tags_dict:
+                v = tags_dict[num_key]
+                new_num = int(v) if v not in (None, "") else 0
+            if total_key in tags_dict:
+                v = tags_dict[total_key]
+                new_total = int(v) if v not in (None, "") else 0
+
+            if new_num == 0 and new_total == 0:
+                tags.pop(atom, None)
+            else:
+                tags[atom] = [(new_num, new_total)]
+
+        if "cover" in tags_dict:
+            value = tags_dict["cover"]
+            if not isinstance(value, bytes) or not value:
+                tags.pop("covr", None)
+            else:
+                fmt = MP4Cover.FORMAT_PNG if value[:4] == b"\x89PNG" else MP4Cover.FORMAT_JPEG
+                tags["covr"] = [MP4Cover(value, imageformat=fmt)]
+
+    @staticmethod
+    def _set_vorbis_tags(tags: Any, tags_dict: dict[str, Any]) -> None:
+        for key, vorbis_key in _VORBIS_WRITE_MAP.items():
+            if key not in tags_dict:
+                continue
+            value = tags_dict[key]
+            if value is None or value == "":
+                tags.pop(vorbis_key, None)
+                tags.pop(vorbis_key.lower(), None)
+            else:
+                tags[vorbis_key] = [str(value)]
+
+        if "cover" in tags_dict:
+            value = tags_dict["cover"]
+            if not isinstance(value, bytes) or not value:
+                tags.pop("METADATA_BLOCK_PICTURE", None)
+                tags.pop("metadata_block_picture", None)
+            else:
+                tags["METADATA_BLOCK_PICTURE"] = [value]
+
+    @staticmethod
+    def set_tags(path: str, tags_dict: dict[str, Any]) -> None:
+        """
+        Update tags of an audio file from a dictionary.
+
+        Only the keys present in ``tags_dict`` are modified.  A value of
+        ``None`` or ``""`` (empty string) removes that tag from the file;
+        any other value overwrites it.  Keys absent from ``tags_dict`` are
+        left exactly as they are.
+
+        Supports all formats covered by mutagen: MP3, MP4/M4A, FLAC, OGG,
+        Opus, WAV, AIFF, WavPack, APE, and others.
+
+        Parameters
+        ----------
+        path : str
+            Path to the audio file.
+        tags_dict : dict[str, Any]
+            Mapping of normalized tag keys to new values.
+
+        Normalized tag keys
+        -------------------
+        title, subtitle, artist, albumartist, album,
+        track, track_total, disc, disc_total,
+        genre, year, composer, bpm, comment, lyrics,
+        cover (bytes), album_sort, artist_sort, title_sort
+        """
+        suffix = Path(path).suffix.lower()
+        if suffix not in SUPPORTED_EXTENSIONS:
+            raise ValueError(f"Unsupported file format: {path}")
+
+        audio = MutagenFile(path, easy=False)
+        if audio is None:
+            raise ValueError(f"Unsupported file format: {path}")
+
+        if audio.tags is None:
+            audio.add_tags()
+
+        tags = audio.tags
+
+        if isinstance(tags, ID3Tags):
+            Editor._set_id3_tags(tags, tags_dict)
+        elif isinstance(tags, MP4Tags):
+            Editor._set_mp4_tags(tags, tags_dict)
+        else:
+            Editor._set_vorbis_tags(tags, tags_dict)
+
+        audio.save()
+
+
+
 class TrackCheck:
     '''
     Object for detecting duplicates from the tags of a track
