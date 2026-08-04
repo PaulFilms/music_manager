@@ -200,7 +200,8 @@ _VORBIS_MAP: dict[str, str] = {
     "METADATA_BLOCK_PICTURE": "cover",
 }
 
-
+# Reverse map: normalized key → VorbisComment key (for writing)
+_VORBIS_WRITE_MAP: dict[str, str] = {v: k for k, v in _VORBIS_MAP.items()}
 
 
 def _first(value: Any) -> Any:
@@ -292,11 +293,13 @@ class Extractor:
             raw = tags.get(vorbis_key) or tags.get(vorbis_key.lower())
             if not raw:
                 continue
-            value = _first(raw)
             if key == "cover":
-                _add_if_present(result, key, value)
+                _add_if_present(result, key, _first(raw))
+            elif key == "comment":
+                joined = "\n".join(str(v) for v in raw if v)
+                _add_if_present(result, key, joined)
             else:
-                _add_if_present(result, key, str(value))
+                _add_if_present(result, key, str(_first(raw)))
         return result
 
     @staticmethod

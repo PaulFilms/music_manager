@@ -24,11 +24,20 @@ class FakePicture:
 
 fake_mutagen_flac.Picture = FakePicture
 
+fake_mutagen_id3 = types.ModuleType("mutagen.id3")
+fake_mutagen_id3.ID3Tags = type("ID3Tags", (), {})
+fake_mutagen_id3.COMM = type("COMM", (), {})
+
+fake_mutagen_mp4 = types.ModuleType("mutagen.mp4")
+fake_mutagen_mp4.MP4Tags = type("MP4Tags", (), {})
+
 fake_yt_dlp = types.ModuleType("yt_dlp")
 fake_yt_dlp.YoutubeDL = object
 
 sys.modules.setdefault("mutagen", fake_mutagen)
 sys.modules.setdefault("mutagen.flac", fake_mutagen_flac)
+sys.modules.setdefault("mutagen.id3", fake_mutagen_id3)
+sys.modules.setdefault("mutagen.mp4", fake_mutagen_mp4)
 sys.modules.setdefault("yt_dlp", fake_yt_dlp)
 
 from music_manager import ytuf
