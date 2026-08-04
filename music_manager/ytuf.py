@@ -15,7 +15,7 @@ from mutagen import File as MutagenFile
 from .audio import from_webm_to_ogg
 
 
-def download(path: str, url: str, audio: bool = False):
+def download(path: str, url: str, audio: bool = False, replace: bool = True):
     '''
     Download a video or audio from a given URL using yt_dlp.
 
@@ -23,6 +23,7 @@ def download(path: str, url: str, audio: bool = False):
         path (str): The directory where the downloaded file will be saved.
         url (str): The URL of the video or audio to download.
         audio (bool): If True, download only the audio. If False, download both video and audio.
+        replace (bool): If True, hold original files (*.webm, *.jpg, *.png, etc.). If False, replace original files with an *.ogg file.
 
     Returns:
         bool: True if the download was successful, False otherwise.
@@ -91,35 +92,40 @@ def download(path: str, url: str, audio: bool = False):
                 None,
             )
 
-        ogg_file = from_webm_to_ogg(
-            input_file=str(webm_file),
-            cover=str(cover_file) if cover_file is not None else None,
-        )
+        if replace:
 
-        audio_tags = MutagenFile(ogg_file, easy=False)
-        if audio_tags is None:
-            raise RuntimeError(f"No se pudieron abrir tags en '{ogg_file}'")
+            ogg_file = from_webm_to_ogg(
+                input_file=str(webm_file),
+                cover=str(cover_file) if cover_file is not None else None,
+            )
 
-        if audio_tags.tags is None:
-            audio_tags.add_tags()
+            audio_tags = MutagenFile(ogg_file, easy=False)
+            if audio_tags is None:
+                raise RuntimeError(f"No se pudieron abrir tags en '{ogg_file}'")
 
-        title = info.get("title")
-        if title:
-            audio_tags["TITLE"] = [str(title)]
+            if audio_tags.tags is None:
+                audio_tags.add_tags()
 
-        original_url = info.get("original_url") or info.get("webpage_url") or url
-        comments = [
-            f"#url: {original_url}",
-            f"#mngr: {datetime.now():%Y%m%d}",
-        ]
-        audio_tags["COMMENT"] = comments
-        audio_tags.save()
+            title = info.get("title")
+            if title:
+                audio_tags["TITLE"] = [str(title)]
 
-        webm_file.unlink(missing_ok=True)
-        if cover_file is not None:
-            cover_file.unlink(missing_ok=True)
+            original_url = info.get("original_url") or info.get("webpage_url") or url
+            comments = [
+                f"#url: {original_url}",
+                f"#mngr: {datetime.now():%Y%m%d}",
+            ]
+            audio_tags["COMMENT"] = comments
+            audio_tags.save()
 
-        return ogg_file
+            webm_file.unlink(missing_ok=True)
+            if cover_file is not None:
+                cover_file.unlink(missing_ok=True)
+
+            return ogg_file
+
+        else:
+            return str(webm_file)
 
 
 def get_items(url: str) -> list[str]:
