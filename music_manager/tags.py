@@ -144,9 +144,9 @@ SUPPORTED_EXTENSIONS: set[str] = {
     ".wav", ".aiff", ".aif", ".wv", ".ape",
 }
 
-## ── Tag key mappings (read: native → normalized) ─────────────────────────────
 
-# ID3 (MP3, AIFF): frame_id → normalized key
+## TAG KEY MAPPINGS key mappings 
+
 _ID3_MAP: dict[str, str] = {
     "TIT2": "title",
     "TIT3": "subtitle",
@@ -164,8 +164,6 @@ _ID3_MAP: dict[str, str] = {
     "USLT": "lyrics",
     "APIC": "cover",
 }
-
-# MP4/M4A (iTunes atoms): atom → normalized key
 _MP4_MAP: dict[str, str] = {
     "©nam": "title",
     "©ART": "artist",
@@ -185,8 +183,6 @@ _MP4_MAP: dict[str, str] = {
     "soar": "artist_sort",
     "sonm": "title_sort",
 }
-
-# VorbisComment (FLAC, OGG, Opus): uppercase key → normalized key
 _VORBIS_MAP: dict[str, str] = {
     "TITLE":        "title",
     "ARTIST":       "artist",
@@ -202,56 +198,9 @@ _VORBIS_MAP: dict[str, str] = {
     "LYRICS":       "lyrics",
     "METADATA_BLOCK_PICTURE": "cover",
 }
-
-
-## ── Tag key mappings (write: normalized → native) ────────────────────────────
-
-# normalized key → ID3 frame id  (text-only frames; COMM/USLT/APIC handled separately)
-_ID3_WRITE_MAP: dict[str, str] = {
-    "title":       "TIT2",
-    "subtitle":    "TIT3",
-    "artist":      "TPE1",
-    "albumartist": "TPE2",
-    "album":       "TALB",
-    "track":       "TRCK",
-    "disc":        "TPOS",
-    "genre":       "TCON",
-    "year":        "TDRC",
-    "composer":    "TCOM",
-    "bpm":         "TBPM",
-}
-
-# normalized key → MP4 atom  (text atoms; trkn/disk/tmpo/covr handled separately)
-_MP4_WRITE_MAP: dict[str, str] = {
-    "title":       "©nam",
-    "artist":      "©ART",
-    "albumartist": "aART",
-    "album":       "©alb",
-    "genre":       "©gen",
-    "year":        "©day",
-    "composer":    "©wrt",
-    "comment":     "©cmt",
-    "lyrics":      "©lyr",
-    "album_sort":  "soal",
-    "artist_sort": "soar",
-    "title_sort":  "sonm",
-}
-
-# normalized key → Vorbis tag key (cover/METADATA_BLOCK_PICTURE handled separately)
-_VORBIS_WRITE_MAP: dict[str, str] = {
-    "title":       "TITLE",
-    "artist":      "ARTIST",
-    "albumartist": "ALBUMARTIST",
-    "album":       "ALBUM",
-    "track":       "TRACKNUMBER",
-    "disc":        "DISCNUMBER",
-    "genre":       "GENRE",
-    "year":        "DATE",
-    "composer":    "COMPOSER",
-    "bpm":         "BPM",
-    "comment":     "COMMENT",
-    "lyrics":      "LYRICS",
-}
+_ID3_WRITE_MAP: dict[str, str] = {v: k for k, v in _ID3_MAP.items()}
+_MP4_WRITE_MAP: dict[str, str] = {v: k for k, v in _MP4_MAP.items()}
+_VORBIS_WRITE_MAP: dict[str, str] = {v: k for k, v in _VORBIS_MAP.items()}
 
 
 def _first(value: Any) -> Any:
@@ -343,11 +292,13 @@ class Extractor:
             raw = tags.get(vorbis_key) or tags.get(vorbis_key.lower())
             if not raw:
                 continue
-            value = _first(raw)
             if key == "cover":
-                _add_if_present(result, key, value)
+                _add_if_present(result, key, _first(raw))
+            elif key == "comment":
+                joined = "\n".join(str(v) for v in raw if v)
+                _add_if_present(result, key, joined)
             else:
-                _add_if_present(result, key, str(value))
+                _add_if_present(result, key, str(_first(raw)))
         return result
 
     @staticmethod
@@ -730,63 +681,63 @@ class Editor:
 
 
 
-class TrackCheck:
-    '''
-    Object for detecting duplicates from the tags of a track
+# class TrackCheck:
+#     '''
+#     Object for detecting duplicates from the tags of a track
 
-    Attributes:
-        artist
-        title
+#     Attributes:
+#         artist
+#         title
     
-    Class methods:
-        from_tags()
-        from_file()
-        list_from_path()
+#     Class methods:
+#         from_tags()
+#         from_file()
+#         list_from_path()
     
-    Static methods:
-        is_duplicate
-    '''
-    artist: str
-    title: str
+#     Static methods:
+#         is_duplicate
+#     '''
+#     artist: str
+#     title: str
 
-    _track_key: str = field(init=False, repr=False)
+#     _track_key: str = field(init=False, repr=False)
 
-    def __post_init__(self):
-        self._track_key = f"{normalize(self.artist)} {normalize(self.title)}"
+#     def __post_init__(self):
+#         self._track_key = f"{normalize(self.artist)} {normalize(self.title)}"
 
-    @classmethod
-    def from_tags(cls, tags_dict: dict[str, Any]):
-        return cls(
-            artist = tags_dict['artist'],
-            title = tags_dict['title'],
-        )
+#     @classmethod
+#     def from_tags(cls, tags_dict: dict[str, Any]):
+#         return cls(
+#             artist = tags_dict['artist'],
+#             title = tags_dict['title'],
+#         )
 
-    @classmethod
-    def from_file(cls, path_file: str):
-        return cls.from_tags(
-            Extractor.get_tags(path_file)
-        )
+#     @classmethod
+#     def from_file(cls, path_file: str):
+#         return cls.from_tags(
+#             Extractor.get_tags(path_file)
+#         )
 
-    @classmethod
-    def list_from_path(cls, path: str) -> list[TrackCheck]:
-        df = get_df_tags_from_path(path)
-        return [
-            cls(
-                artist = normalize(row["artist"]),
-                title = normalize(row["title"])
-            )
-            for _, row in df.iterrows()
-        ]
+#     @classmethod
+#     def list_from_path(cls, path: str) -> list[TrackCheck]:
+#         df = get_df_tags_from_path(path)
+#         return [
+#             cls(
+#                 artist = normalize(row["artist"]),
+#                 title = normalize(row["title"])
+#             )
+#             for _, row in df.iterrows()
+#         ]
 
-    def is_duplicate(self, source: list[TrackCheck], threshold: float = 80) -> bool:
-        for s in source:
-            match = fuzz.token_set_ratio(
-                self._track_key, 
-                s._track_key
-            )
-            if match >= threshold:
-                return True
-        return False
+#     def is_duplicate(self, source: list[TrackCheck], threshold: float = 80) -> bool:
+#         for s in source:
+#             match = fuzz.token_set_ratio(
+#                 self._track_key, 
+#                 s._track_key
+#             )
+#             if match >= threshold:
+#                 return True
+#         return False
 
 
 

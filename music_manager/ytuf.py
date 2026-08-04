@@ -8,11 +8,11 @@ Methods:
 '''
 
 import yt_dlp
-from datetime import datetime
 from pathlib import Path
 from mutagen import File as MutagenFile
 
 from .audio import from_webm_to_ogg
+from .tags import _VORBIS_WRITE_MAP, consolidated_signature
 
 
 def _is_non_individual_youtube_result(info: dict, url: str) -> bool:
@@ -135,14 +135,14 @@ def download(path: str, url: str, audio: bool = False, replace: bool = True):
 
         title = info.get("title")
         if title:
-            audio_tags["TITLE"] = [str(title)]
+            audio_tags[_VORBIS_WRITE_MAP["title"]] = [str(title)]
 
         original_url = info.get("original_url") or info.get("webpage_url") or url
         comments = [
             f"#url: {original_url}",
-            f"#mngr: {datetime.now():%Y%m%d}",
+            consolidated_signature(),
         ]
-        audio_tags["COMMENT"] = comments
+        audio_tags[_VORBIS_WRITE_MAP["comment"]] = comments
         audio_tags.save()
 
         if replace:
