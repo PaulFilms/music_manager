@@ -5,6 +5,7 @@ Methods:
 --------
     download(path: str, url: str, audio: bool = False, replace: bool = True)
     get_items(url: str) -> list[str]
+    get_file_name(url: str) -> str
 '''
 
 import yt_dlp
@@ -32,6 +33,39 @@ def _is_non_individual_youtube_result(info: dict, url: str) -> bool:
         return True
 
     return bool(info.get("entries"))
+
+
+def _to_absolute_youtube_url(item_url: str) -> str:
+    if item_url.startswith("https://") or item_url.startswith("http://"):
+        return item_url
+
+    if item_url.startswith("/"):
+        return f"https://www.youtube.com{item_url}"
+
+    if item_url.startswith("watch?"):
+        return f"https://www.youtube.com/{item_url}"
+
+    return f"https://www.youtube.com/watch?v={item_url}"
+
+
+def _playlist_entry_url(entry: dict, source_url: str) -> str | None:
+    webpage_url = entry.get("webpage_url")
+    if webpage_url:
+        return str(webpage_url)
+
+    entry_url = entry.get("url")
+    if not entry_url:
+        return None
+
+    entry_url = str(entry_url)
+    if entry_url.startswith("https://") or entry_url.startswith("http://"):
+        return entry_url
+
+    is_youtube_source = "youtu" in source_url.lower()
+    if is_youtube_source:
+        return _to_absolute_youtube_url(entry_url)
+
+    return entry_url
 
 
 def download(path: str, url: str, audio: bool = False, replace: bool = True):
@@ -153,6 +187,22 @@ def download(path: str, url: str, audio: bool = False, replace: bool = True):
         return ogg_file
 
 
+def get_file_name(url: str) -> str:
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    if info is None:
+        return "unknown"
+
+    title = info.get("title")
+    return str(title) if title else "unknown"
+
+
 def get_items(url: str) -> list[str]:
     '''
     Returns a list of item URLs from a playlist, album or any collection.
@@ -171,11 +221,16 @@ def get_items(url: str) -> list[str]:
         return []
 
     if info.get('_type') == 'playlist':
-        return [
-            entry['url']
-            for entry in info.get('entries', [])
-            if entry is not None and entry.get('url')
-        ]
+        items: list[str] = []
+        for entry in info.get("entries", []):
+            if entry is None:
+                continue
+
+            item_url = _playlist_entry_url(entry, url)
+            if item_url:
+                items.append(item_url)
+
+        return items
 
     item_url = info.get('webpage_url') or url
     return [item_url]
