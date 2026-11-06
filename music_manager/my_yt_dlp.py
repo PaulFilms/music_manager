@@ -3,17 +3,38 @@ wrapper from yt_dlp to download music from youtube and other sites
 
 Methods:
 --------
-    download(path: str, url: str, audio: bool = False, replace: bool = True)
-    get_items(url: str) -> list[str]
-    get_file_name(url: str) -> str
+- download(path: str, url: str, audio: bool = False, replace: bool = True) -> bool | str | None
+- get_items(url: str) -> list[str]
 '''
+import urllib.request
+from dataclasses import dataclass
 
 import yt_dlp
 from pathlib import Path
 from mutagen import File as MutagenFile
 
-from .audio import from_webm_to_ogg
+from music_manager import __version__
+from .audio import from_webm_to_opus
 from .tags import _VORBIS_WRITE_MAP, consolidated_signature
+
+@dataclass
+class YT_Metadata:
+    title: str | None
+    url: str
+    description: str | None
+    channel: str | None
+    thumbnail: bytes | None
+    duration: int | None
+
+    def to_dict(self) -> dict:
+        return {
+            "title": self.title,
+            "url": self.url,
+            "description": self.description,
+            "channel": self.channel,
+            "thumbnail": self.thumbnail,
+            "duration": self.duration,
+        }
 
 
 def _is_non_individual_youtube_result(info: dict, url: str) -> bool:
@@ -68,7 +89,7 @@ def _playlist_entry_url(entry: dict, source_url: str) -> str | None:
     return entry_url
 
 
-def download(path: str, url: str, audio: bool = False, replace: bool = True):
+def download(path: str, url: str, audio: bool = False, replace: bool = True) -> bool | str | None:
     '''
     Download a video or audio from a given URL using yt_dlp.
 
@@ -108,6 +129,7 @@ def download(path: str, url: str, audio: bool = False, replace: bool = True):
             'format': 'bestaudio[ext=webm]/bestaudio',
             'merge_output_format': 'webm',
             'writethumbnail': True,
+            "restrictfilenames": True,
         })
 
     with yt_dlp.YoutubeDL(opts) as ydl:
@@ -155,9 +177,9 @@ def download(path: str, url: str, audio: bool = False, replace: bool = True):
                 None,
             )
 
-        ogg_file = from_webm_to_ogg(
-            input_file=str(webm_file),
-            cover=str(cover_file) if cover_file is not None else None,
+        ogg_file = from_webm_to_opus(
+            webm_path=str(webm_file),
+            cover_path=str(cover_file) if cover_file is not None else None,
         )
 
         audio_tags = MutagenFile(ogg_file, easy=False)
@@ -187,32 +209,100 @@ def download(path: str, url: str, audio: bool = False, replace: bool = True):
         return ogg_file
 
 
-def get_file_name(url: str) -> str:
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+# def get_file_name(url: str) -> str:
+#     opts = {
+#         "quiet": True,
+#         "no_warnings": True,
+#         "skip_download": True,
+#     }
+#     with yt_dlp.YoutubeDL(opts) as ydl:
+#         info = ydl.extract_info(url, download=False)
 
-    if info is None:
-        return "unknown"
+#     if info is None:
+#         return "unknown"
 
-    title = info.get("title")
-    return str(title) if title else "unknown"
+#     title = info.get("title")
+#     return str(title) if title else "unknown"
 
+# def get_metadata(url: str) -> dict:
+#     opts = {"quiet": True, "no_warnings": True, "skip_download": True}
+#     with yt_dlp.YoutubeDL(opts) as ydl:
+#         info = ydl.extract_info(url, download=False)
 
-def get_items(url: str) -> list[str]:
+#     thumb_bytes = None
+#     thumb_url = info.get("thumbnail")  # yt_dlp ya elige la mejor de info["thumbnails"]
+#     if thumb_url:
+#         with urllib.request.urlopen(thumb_url) as response:
+#             thumb_bytes = response.read()
+
+#     return {
+#         "title": info.get("title"),
+#         "url": info.get("webpage_url") or url,
+#         "thumbnail": thumb_bytes,  # bytes listos para st.image(), DB, etc.
+#     }
+
+# def get_items(url: str) -> list[str]:
+#     '''
+#     Returns a list of item URLs from a playlist, album or any collection.
+#     If the URL points to a single video, returns a list with just that URL.
+#     '''
+#     opts = {
+#         'quiet': True,
+#         'no_warnings': True,
+#         'extract_flat': 'in_playlist',
+#         'skip_download': True,
+#     }
+#     with yt_dlp.YoutubeDL(opts) as ydl:
+#         info = ydl.extract_info(url, download=False)
+
+#     if info is None:
+#         return []
+
+#     if info.get('_type') == 'playlist':
+#         items: list[str] = []
+#         for entry in info.get("entries", []):
+#             if entry is None:
+#                 continue
+
+#             item_url = _playlist_entry_url(entry, url)
+#             if item_url:
+#                 items.append(item_url)
+
+#         return items
+
+#     item_url = info.get('webpage_url') or url
+#     return [item_url]
+
+def _fetch_thumbnail_bytes(info: dict) -> bytes | None:
+    thumb_url = info.get("thumbnail")
+    if not thumb_url:
+        return None
+    try:
+        with urllib.request.urlopen(thumb_url) as response:
+            return response.read()
+    except Exception:
+        return None
+
+def _to_yt_metadata(info: dict, fallback_url: str) -> YT_Metadata:
+    return YT_Metadata(
+        title=info.get("title"),
+        url=str(info.get("webpage_url") or info.get("original_url") or fallback_url),
+        description=info.get("description"),
+        channel=info.get("channel") or info.get("uploader"),
+        thumbnail=_fetch_thumbnail_bytes(info),
+        duration=info.get("duration"),
+    )
+
+def get_items(url: str) -> list[YT_Metadata]:
     '''
-    Returns a list of item URLs from a playlist, album or any collection.
-    If the URL points to a single video, returns a list with just that URL.
+    Returns a list of YT_Metadata from a playlist, album or any collection.
+    If the URL points to a single video, returns a list with just that item.
     '''
     opts = {
         'quiet': True,
         'no_warnings': True,
-        'extract_flat': 'in_playlist',
-        'skip_download': True,
+        'ignoreerrors': True,
+        'skip_download': True,  # sin extract_flat: entradas con metadatos completos
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -221,16 +311,11 @@ def get_items(url: str) -> list[str]:
         return []
 
     if info.get('_type') == 'playlist':
-        items: list[str] = []
+        items: list[YT_Metadata] = []
         for entry in info.get("entries", []):
-            if entry is None:
+            if entry is None:  # vídeo borrado/privado dentro de la playlist
                 continue
-
-            item_url = _playlist_entry_url(entry, url)
-            if item_url:
-                items.append(item_url)
-
+            items.append(_to_yt_metadata(entry, url))
         return items
 
-    item_url = info.get('webpage_url') or url
-    return [item_url]
+    return [_to_yt_metadata(info, url)]

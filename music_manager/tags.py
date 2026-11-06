@@ -9,51 +9,23 @@ Include:
     - TrackCheck
 
     
-BUG:
-
-- Usar rapidfuzz.process.extractOne()
-
-Con extractOne() la librería hace ese trabajo por ti en C++
-
-por ejemplo:
-
-    from rapidfuzz import process, fuzz
-
-    choices = [track._track_ref for track in source]
-
-    best = process.extractOne(
-        self._track_ref,
-        choices,
-        scorer=fuzz.token_set_ratio,
-        score_cutoff=80
-    )
-
-    if best is not None:
-        return True
-
-    return False
-
-y devuelve algo como:
-
-    (
-        "queen bohemian rhapsody",
-        96.3,
-        153
-    )
+BUG's:
 
 - Crear clase TrackLibrary
+- set_tags: a un mp3, error al insertar List[str]
 '''
 
 ## OPTIONAL IMPORTS
-from __future__ import annotations
+# from __future__ import annotations
 # from typing import TYPE_CHECKING
-# if TYPE_CHECKING:
-#     import pandas as _pd
 
+import sqlite3
 import re
+import base64
 import unicodedata
 from pathlib import Path
 from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from dataclasses import dataclass, field
 from collections.abc import Iterable
 from typing import Any
@@ -63,7 +35,13 @@ from mutagen.id3 import (
     TIT2, TIT3, TPE1, TPE2, TALB, TRCK, TPOS, TCON, TDRC, TCOM, TBPM, USLT, APIC,
 )
 from mutagen.mp4 import MP4Tags, MP4Cover
+from mutagen.flac import FLAC, Picture
+from mutagen.apev2 import APEv2, APEBinaryValue
+from mutagen._vorbis import VCommentDict
 from rapidfuzz import fuzz
+
+from music_manager import __version__
+
 
 
 MAX_LENGTH = 100
@@ -72,7 +50,6 @@ INVALID_RE = re.compile(r'[<>:"/\\|?*\x00-\x1F]+')
 SPACE_RE = re.compile(r'\s+')
 EXTRA_RE = re.compile(r"[^\w\s\-.()&+,]")
 SEPARATOR_RE = re.compile(r"[_\-. ]+")
-
 WINDOWS_RESERVED = {
     "con", "prn", "aux", "nul",
     *(f"com{i}" for i in range(1, 10)),
@@ -128,12 +105,16 @@ def normalize(value: Any) -> str:
 
     value = SEPARATOR_RE.sub(" ", value)
 
+    value = value.encode("latin-1", errors="ignore").decode("latin-1")
+    ## Mas estricto, pero elimina ñ, ü, é, etc
+    # value = value.encode("ascii", errors="ignore").decode("ascii")
+
     value = value.strip("_")
 
     if not value:
         return "untranslatable"
 
-    if value in WINDOWS_RESERVED:
+    if value.split(".", 1)[0].casefold() in WINDOWS_RESERVED:
         value = "_" + value
 
     return value[:MAX_LENGTH]
@@ -143,7 +124,6 @@ SUPPORTED_EXTENSIONS: set[str] = {
     ".flac", ".ogg", ".oga", ".opus",
     ".wav", ".aiff", ".aif", ".wv", ".ape",
 }
-
 
 ## TAG KEY MAPPINGS key mappings 
 
@@ -199,7 +179,9 @@ _VORBIS_MAP: dict[str, str] = {
     "METADATA_BLOCK_PICTURE": "cover",
 }
 _ID3_WRITE_MAP: dict[str, str] = {v: k for k, v in _ID3_MAP.items()}
-_MP4_WRITE_MAP: dict[str, str] = {v: k for k, v in _MP4_MAP.items()}
+_MP4_WRITE_MAP: dict[str, str] = {
+    v: k for k, v in _MP4_MAP.items() if k != "gnre"
+}
 _VORBIS_WRITE_MAP: dict[str, str] = {v: k for k, v in _VORBIS_MAP.items()}
 
 
@@ -208,7 +190,6 @@ def _first(value: Any) -> Any:
     if isinstance(value, (list, tuple)) and value:
         return value[0]
     return value
-
 
 def _first_non_empty(value: Any) -> Any:
     """Return the first non-empty element when mutagen returns a sequence."""
@@ -219,7 +200,6 @@ def _first_non_empty(value: Any) -> Any:
         return None
     return value
 
-
 def _is_empty(value: Any) -> bool:
     if value is None:
         return True
@@ -229,8 +209,12 @@ def _is_empty(value: Any) -> bool:
         return len(value) == 0
     return False
 
-
 def _add_if_present(result: dict[str, Any], key: str, value: Any) -> None:
+    if key == "bpm" and not _is_empty(value):
+        try:
+            value = int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        except (InvalidOperation, ValueError, OverflowError):
+            return
     if not _is_empty(value):
         result[key] = value
 
@@ -256,7 +240,8 @@ class Extractor:
             if key == "cover":
                 value = getattr(frame, "data", None)
             elif key == "comment":
-                value = getattr(frame, "text", str(frame))
+                raw = getattr(frame, "text", None)
+                value = str(_first(raw)) if raw else None
             elif hasattr(frame, "text"):
                 raw = frame.text
                 value = str(_first(raw)) if raw else None
@@ -286,19 +271,67 @@ class Extractor:
         return result
 
     @staticmethod
-    def _extract_vorbis(tags: Any) -> dict[str, Any]:
+    def _decode_vorbis_cover(value: Any) -> bytes | None:
+        """
+        Decode cover art from a VorbisComment value.
+
+        Handles the standard METADATA_BLOCK_PICTURE (base64-encoded FLAC
+        Picture block), raw image bytes and the legacy COVERART tag.
+        Returns raw image bytes (JPEG/PNG) or None.
+        """
+        if value is None:
+            return None
+
+        if isinstance(value, bytes):
+            data = value
+        else:
+            try:
+                data = base64.b64decode(str(value))
+            except Exception:
+                return None
+
+        # Already raw image bytes
+        if data[:4] == b"\x89PNG" or data[:3] == b"\xff\xd8\xff":
+            return data
+
+        # FLAC Picture block -> raw image bytes
+        try:
+            return Picture(data).data
+        except Exception:
+            return None
+
+    @staticmethod
+    def _extract_vorbis(audio: Any) -> dict[str, Any]:
+        tags = audio.tags
         result: dict[str, Any] = {}
         for vorbis_key, key in _VORBIS_MAP.items():
+            if key == "cover":
+                continue  # se gestiona al final
             raw = tags.get(vorbis_key) or tags.get(vorbis_key.lower())
             if not raw:
                 continue
-            if key == "cover":
-                _add_if_present(result, key, _first(raw))
-            elif key == "comment":
+            if key == "comment":
                 joined = "\n".join(str(v) for v in raw if v)
                 _add_if_present(result, key, joined)
             else:
                 _add_if_present(result, key, str(_first(raw)))
+
+        # Cover: FLAC la guarda en audio.pictures (nativo);
+        # OGG/Opus en el tag METADATA_BLOCK_PICTURE
+        value = None
+        pictures = getattr(audio, "pictures", None)
+        if pictures:
+            value = bytes(pictures[0].data)
+        else:
+            raw = (
+                tags.get("metadata_block_picture")
+                or tags.get("coverart")
+                or tags.get("cover")
+            )
+            if raw:
+                value = Extractor._decode_vorbis_cover(_first(raw))
+        _add_if_present(result, "cover", value)
+
         return result
 
     @staticmethod
@@ -323,6 +356,8 @@ class Extractor:
         Returns a normalized dict with consistent keys regardless of format,
         plus audio stream info (length, bitrate, sample_rate, channels).
         Returns None if the file format is unsupported.
+        BPM is an int when valid, otherwise omitted. Existing decimal BPM
+        values are rounded to the nearest integer, with ties rounded up.
 
         Normalized tag keys
         -------------------
@@ -348,18 +383,22 @@ class Extractor:
 
         if tags is not None:
             if isinstance(tags, ID3Tags):
+                # MP3, WAV, AIFF
                 tag_data = Extractor._extract_id3(tags)
             elif isinstance(tags, MP4Tags):
+                # M4A, MP4
                 tag_data = Extractor._extract_mp4(tags)
-            else:
-                # VorbisComment (FLAC, OGG, Opus) and others share a dict-like interface
-                tag_data = Extractor._extract_vorbis(tags)
+            elif isinstance(tags, VCommentDict):
+                # VorbisComment: FLAC, OGG, Opus, Speex
+                tag_data = Extractor._extract_vorbis(audio)
+            # Nuevos formatos (APEv2, ASF...): añadir aquí su rama isinstance.
+            # Sin rama -> tag_data vacío y se recurre al fallback easy.
 
         if not tag_data:
             audio_easy = MutagenFile(path, easy=True)
             easy_tags = getattr(audio_easy, "tags", None) if audio_easy is not None else None
             if easy_tags is not None:
-                for key in ("title", "artist", "album", "albumartist", "genre", "date"):
+                for key in ("title", "artist", "album", "albumartist", "genre", "date", "bpm"):
                     if key not in easy_tags:
                         continue
                     value = _first_non_empty(easy_tags.get(key))
@@ -402,15 +441,24 @@ class Extractor:
                 return None
             return bytes(value)
 
-        raw = tags.get("cover") or tags.get("metadata_block_picture")
-        if raw is None:
-            return None
-        value = _first(raw)
-        if value is None:
-            return None
-        if isinstance(value, bytes):
-            return value
-        return bytes(str(value), "utf-8")
+        if isinstance(tags, VCommentDict):
+            # VorbisComment: FLAC, OGG, Opus, Speex
+            # FLAC guarda la carátula en audio.pictures (nativo)
+            pictures = getattr(audio, "pictures", None)
+            if pictures:
+                return bytes(pictures[0].data)
+
+            raw = (
+                tags.get("metadata_block_picture")
+                or tags.get("coverart")
+                or tags.get("cover")
+            )
+            if raw is None:
+                return None
+            return Extractor._decode_vorbis_cover(_first(raw))
+
+        # Nuevos formatos (APEv2, ASF...): añadir aquí su rama isinstance
+        return None
 
     @staticmethod
     def get_filename_from_tags(tags: dict[str, Any], mode: int = 0) -> str:
@@ -457,62 +505,101 @@ class Editor:
     Class for editing tags of audio files using mutagen.
 
     Attributes:
-        set_comments: method - Sets the comment tags of an audio file to a list of strings.
+        edit_comment: method - Edits the comment tags of an audio file with key:value formatted stickers.
         set_tags: method - Sets tags for an audio file from a dictionary.
     """ 
 
     @staticmethod
-    def set_comments(path: str, comments: list[str]) -> None:
-        """
-        Set the comment tags of an audio file to a list of strings.
-        Overwrites any existing comments.
-        """
+    def edit_comment(comment: str, stickers: dict[str, str] = None) -> str:
+        '''
+        Edita un comentario con formato de etiquetas clave:valor.
         
-        audio = MutagenFile(path, easy=False)
-        if audio is None:
-            raise ValueError(f"Unsupported file format: {path}")
+        Args:
+            comment (str): El comentario original.
+            stickers (dict[str, str]): Diccionario con los valores a actualizar.
+    
+        Returns:
+            str: Comentario reconstruido con los valores actualizados.
+        '''
+        if comment is None or comment.strip() == "":
+            comment = ""
+        # if ":" not in comment and not stickers:
+        #     return comment
+        comment_text = ""
+        comment_stickers = {}
+        for item in comment.split(","):
+            if ":" in item and "#" in item:
+                key, value = item.split(":", 1)
+                if key.strip()[0] != "#":
+                    pos = key.find("#")
+                    comment_text += key[:pos].strip()
+                    key = key[pos:]
+                key = key.upper().strip().strip("#")
+                value = value.strip()
+                comment_stickers[key] = value
+            else:
+                if item.strip() != "":
+                    comment_text += item.strip() + ", "
+        if stickers:
+            for key, value in stickers.items():
+                comment_stickers[key.upper().strip()] = value.strip()
+        reconstructed = ", ".join([f"#{k.upper()}:{v}" for k, v in comment_stickers.items()])
+        if comment_text != "":
+            reconstructed = comment_text.strip() + " " + reconstructed
+        return reconstructed
 
-        tags = audio.tags
-        if tags is None:
-            raise ValueError(f"No tags found in file: {path}")
-
-        # Normalize comments
-        comments = [
-            c.strip() 
-            for c in comments 
-            if c and c.strip()
-        ]
-
-        if isinstance(tags, ID3Tags):
-            # Remove existing COMM frames
-            tags.delall("COMM")
-
-            if comments:
-                # Single COMM frame containing multiple texts
-                tags.add(
-                    COMM(
-                        encoding=3,  # UTF-8
-                        lang="und",
-                        desc="",
-                        text=comments
-                    )
-                )
+    # @staticmethod
+    # def set_comments(path: str, comments: list[str]) -> None:
+    #     """
+    #     Set the comment tags of an audio file to a list of strings.
+    #     Overwrites any existing comments.
+    #     """
         
-        elif isinstance(tags, MP4Tags):
-            if comments:
-                tags["©cmt"] = comments
-            else:
-                tags.pop("©cmt", None)
+    #     audio = MutagenFile(path, easy=False)
+    #     if audio is None:
+    #         raise ValueError(f"Unsupported file format: {path}")
 
-        # VorbisComment (FLAC, OGG, Opus) and others
-        else:
-            tags["COMMENT"] = comments
-            if comments:
-                tags["COMMENT"] = comments
-            else:
-                tags.pop("COMMENT", None)
+    #     tags = audio.tags
+    #     if tags is None:
+    #         raise ValueError(f"No tags found in file: {path}")
 
-        audio.save()
+    #     # Normalize comments
+    #     comments = [
+    #         c.strip() 
+    #         for c in comments 
+    #         if c and c.strip()
+    #     ]
+
+    #     if isinstance(tags, ID3Tags):
+    #         # Remove existing COMM frames
+    #         tags.delall("COMM")
+
+    #         if comments:
+    #             # Single COMM frame containing multiple texts
+    #             tags.add(
+    #                 COMM(
+    #                     encoding=3,  # UTF-8
+    #                     lang="und",
+    #                     desc="",
+    #                     text=comments
+    #                 )
+    #             )
+        
+    #     elif isinstance(tags, MP4Tags):
+    #         if comments:
+    #             tags["©cmt"] = comments
+    #         else:
+    #             tags.pop("©cmt", None)
+
+    #     # VorbisComment (FLAC, OGG, Opus) and others
+    #     else:
+    #         tags["COMMENT"] = comments
+    #         if comments:
+    #             tags["COMMENT"] = comments
+    #         else:
+    #             tags.pop("COMMENT", None)
+
+    #     audio.save()
 
     @staticmethod
     def _set_id3_tags(tags: ID3Tags, tags_dict: dict[str, Any]) -> None:
@@ -561,8 +648,11 @@ class Editor:
 
     @staticmethod
     def _set_mp4_tags(tags: MP4Tags, tags_dict: dict[str, Any]) -> None:
+        if "genre" in tags_dict:
+            tags.pop("gnre", None)
+        
         for key, atom in _MP4_WRITE_MAP.items():
-            if key not in tags_dict:
+            if key == "bpm" or key not in tags_dict:
                 continue
             value = tags_dict[key]
             if value is None or value == "":
@@ -572,13 +662,10 @@ class Editor:
 
         if "bpm" in tags_dict:
             value = tags_dict["bpm"]
-            if value is None or value == "":
+            if value is None:
                 tags.pop("tmpo", None)
             else:
-                try:
-                    tags["tmpo"] = [int(value)]
-                except (ValueError, TypeError):
-                    tags.pop("tmpo", None)
+                tags["tmpo"] = [value]
 
         for num_key, total_key, atom in (("track", "track_total", "trkn"), ("disc", "disc_total", "disk")):
             if num_key not in tags_dict and total_key not in tags_dict:
@@ -617,16 +704,18 @@ class Editor:
                 continue
             value = tags_dict[key]
             if value is None or value == "":
-                tags.pop(vorbis_key, None)
-                tags.pop(vorbis_key.lower(), None)
+                for tag_key in (vorbis_key, vorbis_key.lower()):
+                    if tag_key in tags:
+                        del tags[tag_key]
             else:
                 tags[vorbis_key] = [str(value)]
 
         if "cover" in tags_dict:
             value = tags_dict["cover"]
             if not isinstance(value, bytes) or not value:
-                tags.pop("METADATA_BLOCK_PICTURE", None)
-                tags.pop("metadata_block_picture", None)
+                for tag_key in ("METADATA_BLOCK_PICTURE", "metadata_block_picture"):
+                    if tag_key in tags:
+                        del tags[tag_key]
             else:
                 tags["METADATA_BLOCK_PICTURE"] = [value]
 
@@ -649,6 +738,8 @@ class Editor:
             Path to the audio file.
         tags_dict : dict[str, Any]
             Mapping of normalized tag keys to new values.
+            BPM must be an int or None (removes the tag). Strings, floats,
+            and booleans are rejected before opening the audio file.
 
         Normalized tag keys
         -------------------
@@ -660,6 +751,11 @@ class Editor:
         suffix = Path(path).suffix.lower()
         if suffix not in SUPPORTED_EXTENSIONS:
             raise ValueError(f"Unsupported file format: {path}")
+
+        if "bpm" in tags_dict:
+            bpm = tags_dict["bpm"]
+            if bpm is not None and type(bpm) is not int:
+                raise TypeError("bpm must be an int or None")
 
         audio = MutagenFile(path, easy=False)
         if audio is None:
@@ -679,9 +775,146 @@ class Editor:
 
         audio.save()
 
+    @staticmethod
+    def set_cover(path: str, cover: bytes) -> None:
+        """Replace embedded artwork with JPEG/PNG bytes; b"" removes it.
+
+        Supports ID3, MP4, native FLAC pictures, Vorbis comments and APEv2.
+        Other metadata is preserved. Unsupported image/tag formats raise
+        ValueError before the file is saved.
+        """
+        if not isinstance(cover, bytes):
+            raise TypeError("cover must be bytes")
+        if cover.startswith(b"\x89PNG\r\n\x1a\n"):
+            mime, image_format, filename = "image/png", MP4Cover.FORMAT_PNG, "cover.png"
+        elif cover.startswith(b"\xff\xd8\xff"):
+            mime, image_format, filename = "image/jpeg", MP4Cover.FORMAT_JPEG, "cover.jpg"
+        elif cover:
+            raise ValueError("Cover must be a JPEG or PNG image")
+
+        if Path(path).suffix.lower() not in SUPPORTED_EXTENSIONS:
+            raise ValueError(f"Unsupported file format: {path}")
+        audio = MutagenFile(path, easy=False)
+        if audio is None:
+            raise ValueError(f"Unsupported file format: {path}")
+        if audio.tags is None:
+            audio.add_tags()
+        tags = audio.tags
+
+        if isinstance(tags, ID3Tags):
+            Editor._set_id3_tags(tags, {"cover": cover})
+        elif isinstance(tags, MP4Tags):
+            if cover:
+                tags["covr"] = [MP4Cover(cover, imageformat=image_format)]
+            else:
+                tags.pop("covr", None)
+        elif isinstance(audio, FLAC) or isinstance(tags, VCommentDict):
+            for key in ("metadata_block_picture", "coverart", "coverartmime", "cover"):
+                if key in tags:
+                    del tags[key]
+            picture = Picture()
+            if cover:
+                picture.type = 3
+                picture.mime = mime
+                picture.data = cover
+            if isinstance(audio, FLAC):
+                audio.clear_pictures()
+                if cover:
+                    audio.add_picture(picture)
+            elif cover:
+                tags["metadata_block_picture"] = [
+                    base64.b64encode(picture.write()).decode("ascii")
+                ]
+        elif isinstance(tags, APEv2):
+            for key in list(tags):
+                if key.lower().startswith("cover art ("):
+                    del tags[key]
+            if cover:
+                tags["Cover Art (Front)"] = APEBinaryValue(
+                    filename.encode("ascii") + b"\x00" + cover
+                )
+        else:
+            raise ValueError(f"Unsupported tag format for cover art: {path}")
+
+        audio.save()
 
 
-# class TrackCheck:
+class TrackCheck:
+    '''
+    Class for checking if a track is a duplicate based on its tags.
+    
+    `methods:`
+        isDuplicate(audio_path: str | Path, threshold: float = 80) -> bool
+
+    '''
+    def __init__(self, db_path: str | Path) -> None:
+        if not Path(db_path).exists():
+            raise ValueError(f"DB file does not exist: {db_path}")
+        try:
+            conn = sqlite3.connect(db_path)
+        except Exception as e:
+            raise ValueError(f"Failed to connect to DB: {e}")
+
+        # Compruebo que exista la tabla 'files'
+        try:
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='files';")
+            table_exists = cursor.fetchone()
+            if not table_exists:
+                raise ValueError("'files' table does not exist in the DB")
+        except Exception as e:
+            raise ValueError(f"Failed to check 'files' table in DB: {e}")
+
+        cursor = conn.execute("SELECT filename, artist, title FROM files")
+        rows = cursor.fetchall()
+
+        self.filenames: list[str] = [e[0] for e in rows]
+        self.filenames_set: set[str] = set(self.filenames)
+        self.artist_title = []
+        for e in rows:
+            db_artist = self._normalize(e[1]) if e[1] else ''
+            db_title = self._normalize(e[2]) if e[2] else ''
+            artist_title = f"{db_artist} {db_title}"
+            if len(artist_title.strip()) ==0:
+                artist_title = self._normalize(e[0])
+            self.artist_title.append(artist_title)
+        # self.artist_title: list[str] = [f"{self._normalize(e[1]) if e[1] else 'unknown'} {self._normalize(e[2])}" for e in rows]
+        self.artist_title_set: set[str] = set(self.artist_title)
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        text = text.casefold()
+        # Eliminar acentos
+        text = unicodedata.normalize("NFKD", text)
+        text = "".join(
+            c for c in text
+            if not unicodedata.combining(c)
+        )
+        # Sustituir puntuación por espacios
+        text = re.sub(r"[^\w\s]", " ", text)
+        # Normalizar espacios
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    def isDuplicate_file(self, filename: str | Path) -> bool:
+        if str(filename) in self.filenames_set:
+            return True
+        return False
+
+    def isDuplicate_tags(self, artist: str , title: str, filename: str = None, threshold: float = 80) -> bool:
+        if filename:
+            if filename in self.filenames_set:
+                return True
+        key = f"{self._normalize(artist)} {self._normalize(title)}"
+        if key in self.artist_title_set:
+            return True
+        for existing in self.artist_title:
+            ratio = fuzz.ratio(key, existing)
+            token_sort = fuzz.token_sort_ratio(key, existing)
+            score = (token_sort * 0.85) + (ratio * 0.15)
+            if score >= threshold:
+                return True
+        return False
+
 #     '''
 #     Object for detecting duplicates from the tags of a track
 
@@ -745,7 +978,8 @@ TAG_PATTERN = re.compile(r"^#(?P<key>[a-zA-Z0-9_-]+):\s*(?P<value>.*)$")
 
 def consolidated_signature() -> str:
     CONSOLIDATED_PREFIX = "mngr"
-    return f"#{CONSOLIDATED_PREFIX}: {datetime.now():%Y%m%d}"
+    # return f"#{CONSOLIDATED_PREFIX}: {datetime.now():%Y%m%d}"
+    return f"#{CONSOLIDATED_PREFIX}: {__version__}"
 
 
 # def get_df_tags_from_path(path: str) -> _pd.DataFrame:

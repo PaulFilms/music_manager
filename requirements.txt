@@ -1,6 +1,6 @@
 ## TAGS / FILENAME
 # tinytag
-# RapidFuzz
+RapidFuzz
 mutagen
 
 # streamlit
@@ -14,3 +14,5 @@ librosa # for audio processing
 yt_dlp
 gamdl
 # https://github.com/yaronzz/Tidal-Media-Downloader
+
+mysqlite @ git+https://github.com/PaulFilms/MySQLite.git@main

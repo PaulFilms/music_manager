@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "music_manager"
+dynamic = ["version"]
+description = "Audio files toolset"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+  { name="Pablo GP", email="pablopila.dev@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+  # "PySide6",
+  # "pandas",
+  # "markdown2"
+]
+
+[project.optional-dependencies]
+# pandas = ["pandas"]
+# markdown = ["markdown2"]
+# all = [ "easypyside[pandas,markdown]", ]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["music_manager*"]
+
+[tool.setuptools.package-data]
+# easypyside = ["__forms/*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "music_manager.__version__" }
+
+[project.urls]
+"Homepage" = "hhttps://github.com/PaulFilms/music_manager"
+"Documentation" = "https://github.com/PaulFilms/music_manager/blob/main/README.md"
+"Bug Tracker" = "https://github.com/PaulFilms/music_manager/issues"

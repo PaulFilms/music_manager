@@ -1,5 +1,16 @@
 # MUSIC MANAGER
 
+<div align="center">
+    <br>
+    <img 
+        src="assets/logo.svg" 
+        width=100 alt="image" 
+        align="center"
+    />
+    <br>
+    <br>
+</div>
+
 Quiero hacer un software de gestion de playlist y organización de ficheros de musica locales.
 Incluyendo plataformas como Apple Music, Spotify, Tidal, y archivos locales
 
@@ -12,7 +23,7 @@ Incluyendo plataformas como Apple Music, Spotify, Tidal, y archivos locales
 - [FFMPEG](https://ffmpeg.org/)
 - [YT_DLP](https://pypi.org/project/yt-dlp/)
 - [GAMDL](https://github.com/glomatico/gamdl.git)
-- [TIDAL MEDIA DOWNLOAD](https://github.com/yaronzz/Tidal-Media-Downloader)
+<!-- - [TIDAL MEDIA DOWNLOAD](https://github.com/yaronzz/Tidal-Media-Downloader) -->
 
 
 
